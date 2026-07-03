@@ -21,8 +21,16 @@ def to_minor(value: str | Decimal, currency: str) -> int:
             value = Decimal(value)
         except InvalidOperation:
             return 0
-    q = Decimal(10) ** -exponent(currency)
-    return int((value.quantize(q, rounding=ROUND_HALF_EVEN)) * (10 ** exponent(currency)))
+    e = exponent(currency)
+    try:
+        minor = int(value.quantize(Decimal(10) ** -e, rounding=ROUND_HALF_EVEN) * (10 ** e))
+    except (InvalidOperation, OverflowError, ValueError):
+        # e.g. '1e309' — quantize overflows; treat as unparseable rather than crash
+        return 0
+    # guard the downstream BIGINT column against out-of-range values
+    if not (-(2 ** 63) <= minor < 2 ** 63):
+        return 0
+    return minor
 
 
 def bps_of(amount_minor: int, bps: int) -> int:

@@ -107,7 +107,7 @@ CREATE TABLE IF NOT EXISTS transactions (
   transaction_uuid    UUID NOT NULL DEFAULT gen_random_uuid() UNIQUE,
   merchant_id         BIGINT NOT NULL REFERENCES merchants(id),
   tracking_id         TEXT,
-  upstream_payment_id TEXT UNIQUE,
+  upstream_payment_id TEXT,   -- unique per merchant (see ux_txn_merchant_payment below)
   order_id            TEXT,
   order_description   TEXT,
   customer_name       TEXT,
@@ -212,3 +212,10 @@ ALTER TABLE transactions
   ADD COLUMN IF NOT EXISTS ledger_posted BOOLEAN NOT NULL DEFAULT TRUE;
 CREATE INDEX IF NOT EXISTS ix_txn_quarantined
   ON transactions (merchant_id) WHERE ledger_posted = FALSE;
+
+-- Idempotency is per merchant, not global: two merchants can legitimately share a
+-- processor payment id, so a global UNIQUE silently dropped the second one. Use a
+-- composite key instead (matches the ON CONFLICT clause in the importer).
+ALTER TABLE transactions DROP CONSTRAINT IF EXISTS transactions_upstream_payment_id_key;
+CREATE UNIQUE INDEX IF NOT EXISTS ux_txn_merchant_payment
+  ON transactions (merchant_id, upstream_payment_id);

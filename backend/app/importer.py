@@ -80,11 +80,18 @@ def clean(v: str) -> str:
 
 def parse_dt(v: str) -> datetime | None:
     v = clean(v)
+    if not v:
+        return None
+    # Real processor CSVs use ISO ('2026-06-10 23:57:08'); try that first so the
+    # bulk of rows are dated correctly instead of falling through to now().
+    try:
+        d = datetime.fromisoformat(v)
+        return d if d.tzinfo else d.replace(tzinfo=timezone.utc)
+    except ValueError:
+        pass
     for f in ("%d-%m-%Y %H:%M", "%m-%d-%Y %H:%M", "%d-%m-%Y", "%m-%d-%Y"):
         try:
-            d = datetime.strptime(v, f)
-            # files are labelled June 2026; DD-MM is the primary format
-            return d.replace(tzinfo=timezone.utc)
+            return datetime.strptime(v, f).replace(tzinfo=timezone.utc)
         except ValueError:
             continue
     return None
@@ -111,7 +118,8 @@ class Importer:
         self.merchants: dict[str, dict] = {}   # member_id -> {id, name}
         self.schedules: dict[int, dict] = {}
         self.stats = dict(txns=0, captures=0, declines=0, refunds=0, skipped_dupes=0,
-                          unmatched_refunds=0, quarantined=0, quarantined_merchants=0)
+                          unmatched_refunds=0, quarantined=0, quarantined_merchants=0,
+                          skipped_bad_currency=0, skipped_bad_date=0, negative_amount=0)
 
     # -- merchants -----------------------------------------------------------
     def merchant_for(self, cur, member_id: str, name: str) -> dict:
@@ -167,19 +175,31 @@ class Importer:
                 ccy = r.get("Currency", "").upper()
                 if not ccy:
                     continue
+                if len(ccy) != 3:
+                    # e.g. "US Dollar" — would overflow the CHAR(3) column and abort
+                    # the whole chunk. Skip with a reason instead.
+                    self.stats["skipped_bad_currency"] += 1
+                    continue
+                occurred = parse_dt(r.get("Transaction Date(MM/DD/YYYY)", ""))
+                if occurred is None:
+                    # never silently stamp import-time; an undateable row is skipped
+                    self.stats["skipped_bad_date"] += 1
+                    continue
                 member = r.get("Member ID", "")
                 mname = r.get("Merchant Company Name") or name_map.get(member, "")
                 merchant = self.merchant_for(cur, member, mname)
                 mid = merchant["id"]
                 sched = self.schedule_for(cur, mid)
                 configured = sched is not None
-                occurred = parse_dt(r.get("Transaction Date(MM/DD/YYYY)", "")) or \
-                    datetime.now(timezone.utc)
                 status = STATUS_MAP.get(r.get("Status", ""), "initiated")
                 auth = to_minor(r.get("Auth Amount", "0"), ccy)
                 captured = to_minor(r.get("Captured Amount", "0"), ccy)
                 refunded = to_minor(r.get("Refund Amount", "0"), ccy)
                 cb = to_minor(r.get("Chargeback Amount", "0"), ccy)
+                if min(auth, captured, refunded, cb) < 0:
+                    # negative amounts would pollute dashboard sums with no ledger event
+                    self.stats["negative_amount"] += 1
+                    continue
 
                 # transaction row (idempotent on upstream payment id). Unknown
                 # merchants have no fee schedule yet: the row is imported but marked
@@ -193,7 +213,7 @@ class Importer:
                          refunded_minor, chargeback_minor, status, reason, occurred_at,
                          source_file, ledger_posted)
                        VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
-                       ON CONFLICT (upstream_payment_id) DO NOTHING RETURNING id""",
+                       ON CONFLICT (merchant_id, upstream_payment_id) DO NOTHING RETURNING id""",
                     (mid, r.get("Tracking ID"), pay_id, r.get("Order ID"),
                      r.get("Order Description"), r.get("Card Holder's Name"),
                      (r.get("Customer Email") or "").lower(), r.get("Phone Number"),
@@ -233,15 +253,21 @@ class Importer:
             mdr = bps_of(captured, sched["mdr_bps"])
             app_fee = sched["approved_txn_fee_minor"]
             payable = captured - mdr - app_fee
+            legs = [Leg("clearing", None, DEBIT, captured)]
+            if payable > 0:
+                legs.append(Leg("merchant_payable", mid, CREDIT, payable))
+                legs.append(Leg("gateway_revenue", None, CREDIT, mdr + app_fee))
+            else:
+                # fees meet/exceed the capture: gateway takes the whole capture and
+                # the merchant nets zero — never book a non-positive payable leg
+                # (which would raise UnbalancedEvent and abort the import/onboard).
+                payable, mdr, app_fee = 0, captured, 0
+                legs.append(Leg("gateway_revenue", None, CREDIT, captured))
             poster.add(
                 event_type="payment_captured", source_type="capture",
-                source_id=pay_id, merchant_id=mid, currency=ccy,
+                source_id=f"{mid}:{pay_id}", merchant_id=mid, currency=ccy,
                 occurred_at=occurred, settle_after=settle_after, source_txn_id=txn_id,
-                legs=[
-                    Leg("clearing", None, DEBIT, captured),
-                    Leg("merchant_payable", mid, CREDIT, payable),
-                    Leg("gateway_revenue", None, CREDIT, mdr + app_fee),
-                ],
+                legs=legs,
             )
             fee_rows.append((pay_id, mid, "mdr", ccy, mdr, txn_id))
             if app_fee:
@@ -252,7 +278,7 @@ class Importer:
             if hold > 0:
                 poster.add(
                     event_type="reserve_hold", source_type="reserve_hold",
-                    source_id=pay_id, merchant_id=mid, currency=ccy,
+                    source_id=f"{mid}:{pay_id}", merchant_id=mid, currency=ccy,
                     occurred_at=occurred, settle_after=settle_after, source_txn_id=txn_id,
                     legs=[
                         Leg("merchant_payable", mid, DEBIT, hold),
@@ -270,7 +296,7 @@ class Importer:
             d = sched["declined_txn_fee_minor"]
             poster.add(
                 event_type="decline_fee", source_type="decline_fee",
-                source_id=pay_id, merchant_id=mid, currency=ccy,
+                source_id=f"{mid}:{pay_id}", merchant_id=mid, currency=ccy,
                 occurred_at=occurred, settle_after=settle_after, source_txn_id=txn_id,
                 legs=[
                     Leg("merchant_payable", mid, DEBIT, d),
@@ -289,7 +315,7 @@ class Importer:
         SRC = {"mdr": "capture", "approved_txn": "capture",
                "declined_txn": "decline_fee", "refund_fee": "refund"}
         for pay_id, m, ftype, ccy, minor, txn in fee_rows:
-            sid = f"{pay_id}:rf" if ftype == "refund_fee" else pay_id
+            sid = f"{m}:{pay_id}:rf" if ftype == "refund_fee" else f"{m}:{pay_id}"
             eid = ids.get((SRC[ftype], sid))
             if eid:
                 cur.execute(
@@ -298,7 +324,7 @@ class Importer:
                     (m, txn, ftype, ccy, minor, eid),
                 )
         for pay_id, m, ccy, minor, due in reserve_rows:
-            eid = ids.get(("reserve_hold", pay_id))
+            eid = ids.get(("reserve_hold", f"{m}:{pay_id}"))
             if eid:
                 cur.execute(
                     "INSERT INTO reserve_holds (merchant_id, currency, amount_minor, "
@@ -315,7 +341,8 @@ class Importer:
                 Leg("clearing", None, CREDIT, amount)]
         if rf:
             legs.append(Leg("gateway_revenue", None, CREDIT, rf))
-        poster.add(event_type="refund", source_type="refund", source_id=f"{pay_id}:rf",
+        poster.add(event_type="refund", source_type="refund",
+                   source_id=f"{mid}:{pay_id}:rf",
                    merchant_id=mid, currency=ccy, occurred_at=occurred,
                    settle_after=settle_after, source_txn_id=txn_id, legs=legs)
         if rf:
@@ -426,7 +453,7 @@ class Importer:
                            VALUES (%s,%s,%s,0,'refunded',%s,
                                    'prior-period purchase (before report window)',
                                    %s,%s,'TW-US')
-                           ON CONFLICT (upstream_payment_id) DO NOTHING RETURNING id""",
+                           ON CONFLICT (merchant_id, upstream_payment_id) DO NOTHING RETURNING id""",
                         (m["id"], pid, ccy, occurred,
                          r.get("Payment Method", ""), path.rsplit("/", 1)[-1]),
                     )
@@ -463,7 +490,7 @@ class Importer:
             ids = poster.flush()
             self.stats["skipped_dupes"] += poster.skipped
             for pay_id, m, ftype, ccy, minor, txn in pending:
-                eid = ids.get(("refund", f"{pay_id}:rf"))
+                eid = ids.get(("refund", f"{m}:{pay_id}:rf"))
                 if eid:
                     cur.execute(
                         "INSERT INTO fees (merchant_id, transaction_id, fee_type, currency, "
