@@ -2,12 +2,20 @@
 from __future__ import annotations
 
 import os
+import secrets
 import time
 
 import jwt
 from fastapi import Depends, HTTPException, Request
 
-SECRET = os.environ.get("TW_JWT_SECRET", "demo-secret-rotate-me")
+# A hardcoded fallback secret would let anyone forge an admin token. If the env
+# var is unset, mint a random per-process secret instead (tokens simply won't
+# survive a restart) — there is no known secret to sign with.
+SECRET = os.environ.get("TW_JWT_SECRET")
+if not SECRET:
+    SECRET = secrets.token_urlsafe(48)
+    print("WARNING: TW_JWT_SECRET is unset — using a random per-process secret; "
+          "set TW_JWT_SECRET to keep sessions valid across restarts.")
 TTL = 12 * 3600  # demo-long
 
 DEMO_USERS = {

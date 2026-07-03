@@ -99,7 +99,12 @@ def _window_start(conn: psycopg.Connection, merchant_id: int, currency: str) -> 
 def run_cycle(conn: psycopg.Connection, *, cutoff: datetime | None = None,
               generated_by: str = "scheduler") -> dict:
     """Run one settlement cycle. Returns a summary of releases, payouts, and skips."""
-    cutoff = cutoff or _now()
+    now = _now()
+    cutoff = cutoff or now
+    # A future cutoff would release rolling reserves before their hold has elapsed
+    # (reserves exist to cover future chargebacks) — clamp it to now.
+    if cutoff > now:
+        cutoff = now
     released = release_due_reserves(conn, cutoff)
 
     settled, skipped = [], []
