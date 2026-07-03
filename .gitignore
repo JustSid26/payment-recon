@@ -1,0 +1,25 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+*.egg-info/
+.pytest_cache/
+
+# Node / frontend
+node_modules/
+dist/
+.vite/
+
+# OS / editor / local tooling
+.DS_Store
+.claude/
+
+# Env / secrets
+.env
+.env.*
+
+# Raw transaction data — contains cardholder PII, never commit
+*.csv
+*.xlsx
+*.docx
