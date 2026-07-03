@@ -34,7 +34,19 @@ def resolve_rates(*, preset: str | None = None, overrides: dict | None = None) -
     missing = [c for c in FEE_COLUMNS if c not in base]
     if missing:
         raise ValueError(f"missing required rate fields: {', '.join(missing)}")
+    _validate_rates(base)
     return base
+
+
+def _validate_rates(r: dict) -> None:
+    """Reject hostile/degenerate schedules before they reach the ledger."""
+    for k in ("mdr_bps", "reserve_hold_bps", "settlement_fee_bps"):
+        if not (0 <= r[k] <= 10000):
+            raise ValueError(f"{k} must be 0–10000 bps (0–100%), got {r[k]}")
+    for k in ("approved_txn_fee_minor", "declined_txn_fee_minor", "refund_fee_minor",
+              "chargeback_fee_minor", "reserve_hold_days", "settlement_delay_days"):
+        if r[k] < 0:
+            raise ValueError(f"{k} must be non-negative, got {r[k]}")
 
 
 def assign_fee_schedule(conn: psycopg.Connection, merchant_id: int, rates: dict,
@@ -42,6 +54,9 @@ def assign_fee_schedule(conn: psycopg.Connection, merchant_id: int, rates: dict,
     """Set (or replace) a merchant's fee schedule and activate them. By default
     replays their quarantined transactions into the ledger. Rates changes only
     affect not-yet-posted transactions — the ledger is append-only."""
+    # Activation AND replay run in ONE transaction: if the replay fails (e.g. a
+    # bad schedule), the status='active' + fee schedule roll back too, so a
+    # merchant is never stranded active-with-no-ledger-events.
     with conn.transaction():
         cur = conn.cursor()
         cur.execute("SELECT id FROM merchants WHERE id=%s FOR UPDATE", (merchant_id,))
@@ -50,7 +65,7 @@ def assign_fee_schedule(conn: psycopg.Connection, merchant_id: int, rates: dict,
         cur.execute("DELETE FROM fee_schedules WHERE merchant_id=%s", (merchant_id,))
         insert_fee_schedule(cur, merchant_id, rates)
         cur.execute("UPDATE merchants SET status='active' WHERE id=%s", (merchant_id,))
-    posted = reprocess_merchant(conn, merchant_id) if reprocess else 0
+        posted = _reprocess_body(conn, cur, merchant_id) if reprocess else 0
     return {"merchant_id": merchant_id, "transactions_posted": posted}
 
 
@@ -58,35 +73,40 @@ def reprocess_merchant(conn: psycopg.Connection, merchant_id: int) -> int:
     """Post ledger events for a merchant's quarantined transactions. Idempotent —
     the ledger's source-id replay gate prevents double posting. Returns the count
     of transactions moved out of quarantine."""
-    imp = Importer(conn)  # reuse _post_transaction / _flush_and_link (and its stats)
     with conn.transaction():
-        cur = conn.cursor()
-        sched = imp.schedule_for(cur, merchant_id)
-        if sched is None:
-            raise ValueError("merchant has no fee schedule; assign one first")
-        cur.execute(
-            "SELECT id, upstream_payment_id, currency, occurred_at, status, "
-            "captured_minor, refunded_minor FROM transactions "
-            "WHERE merchant_id=%s AND ledger_posted=false ORDER BY id",
-            (merchant_id,),
+        return _reprocess_body(conn, conn.cursor(), merchant_id)
+
+
+def _reprocess_body(conn: psycopg.Connection, cur, merchant_id: int) -> int:
+    """Replay a merchant's quarantined transactions into the ledger. Runs inside
+    the caller's transaction (shared by onboarding so it is atomic)."""
+    imp = Importer(conn)  # reuse _post_transaction / _flush_and_link
+    sched = imp.schedule_for(cur, merchant_id)
+    if sched is None:
+        raise ValueError("merchant has no fee schedule; assign one first")
+    cur.execute(
+        "SELECT id, upstream_payment_id, currency, occurred_at, status, "
+        "captured_minor, refunded_minor FROM transactions "
+        "WHERE merchant_id=%s AND ledger_posted=false ORDER BY id",
+        (merchant_id,),
+    )
+    txns = cur.fetchall()
+    poster = BulkPoster(conn)
+    fee_rows: list = []
+    reserve_rows: list = []
+    for t in txns:
+        imp._post_transaction(
+            poster, fee_rows, reserve_rows, sched,
+            pay_id=t["upstream_payment_id"], mid=merchant_id, ccy=t["currency"],
+            occurred=t["occurred_at"], status=t["status"],
+            captured=t["captured_minor"], refunded=t["refunded_minor"], txn_id=t["id"],
         )
-        txns = cur.fetchall()
-        poster = BulkPoster(conn)
-        fee_rows: list = []
-        reserve_rows: list = []
-        for t in txns:
-            imp._post_transaction(
-                poster, fee_rows, reserve_rows, sched,
-                pay_id=t["upstream_payment_id"], mid=merchant_id, ccy=t["currency"],
-                occurred=t["occurred_at"], status=t["status"],
-                captured=t["captured_minor"], refunded=t["refunded_minor"], txn_id=t["id"],
-            )
-        imp._flush_and_link(cur, poster, fee_rows, reserve_rows)
-        cur.execute(
-            "UPDATE transactions SET ledger_posted=true "
-            "WHERE merchant_id=%s AND ledger_posted=false",
-            (merchant_id,),
-        )
+    imp._flush_and_link(cur, poster, fee_rows, reserve_rows)
+    cur.execute(
+        "UPDATE transactions SET ledger_posted=true "
+        "WHERE merchant_id=%s AND ledger_posted=false",
+        (merchant_id,),
+    )
     return len(txns)
 
 
