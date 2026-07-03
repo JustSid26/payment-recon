@@ -1,8 +1,9 @@
+import { useMemo } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { api, getUser } from '../lib/api'
 import { useApi } from '../lib/useApi'
-import type { Dashboard as DashboardData, LedgerAccount, Settlement } from '../lib/types'
-import { fmtDate, fmtInt, fmtMoney } from '../lib/money'
+import type { Dashboard as DashboardData, LedgerAccount, Settlement, VolumeRow } from '../lib/types'
+import { fmtDate, fmtInt } from '../lib/money'
 import VolumeChart from '../components/VolumeChart'
 import { DataTable, EmptyState, MoneyCell, SkeletonCard, StatusChip, type Column } from '../components/ui'
 
@@ -21,157 +22,102 @@ export default function Dashboard() {
     [isMerchant],
   )
 
+  const totals = useMemo(() => {
+    const v = data?.volume ?? []
+    return {
+      paid: v.reduce((s, r) => s + r.paid_count, 0),
+      declined: v.reduce((s, r) => s + r.declined_count, 0),
+    }
+  }, [data])
+
+  // ---- the recon table: money per currency ----
+  const currencyCols: Column<VolumeRow>[] = [
+    { key: 'ccy', header: 'Currency', render: (v) => <span className="ccy-tag">{v.currency}</span> },
+    { key: 'cap', header: 'Captured', align: 'right', render: (v) => <MoneyCell minor={v.captured_minor} currency={v.currency} /> },
+    { key: 'fees', header: isMerchant ? 'Fees' : 'Fees earned', align: 'right', render: (v) => <MoneyCell minor={v.fees_minor} currency={v.currency} dimZero /> },
+    { key: 'ref', header: 'Refunds', align: 'right', render: (v) => <MoneyCell minor={v.refunded_minor} currency={v.currency} dimZero /> },
+    { key: 'net', header: 'Net payable', align: 'right', render: (v) => <b><MoneyCell minor={v.net_payable_minor} currency={v.currency} /></b> },
+    { key: 'paid', header: 'Paid', align: 'right', render: (v) => <span className="num" style={{ color: 'var(--green)' }}>{fmtInt(v.paid_count)}</span> },
+    { key: 'dec', header: 'Declined', align: 'right', render: (v) => <span className="num dim">{fmtInt(v.declined_count)}</span> },
+  ]
+
   const topMerchantCols: Column<DashboardData['top_merchants'][number]>[] = [
     { key: 'name', header: 'Merchant', render: (m) => <b>{m.name}</b> },
     { key: 'ccy', header: 'Currency', render: (m) => <span className="ccy-tag">{m.currency}</span> },
     { key: 'txn', header: 'Txns', align: 'right', render: (m) => <span className="num">{fmtInt(m.txn_count)}</span> },
-    {
-      key: 'captured',
-      header: 'Captured',
-      align: 'right',
-      render: (m) => <MoneyCell minor={m.captured_minor} currency={m.currency} />,
-    },
+    { key: 'captured', header: 'Captured', align: 'right', render: (m) => <MoneyCell minor={m.captured_minor} currency={m.currency} /> },
   ]
 
   const recentSettlementCols: Column<Settlement>[] = [
     { key: 'win', header: 'Window', render: (s) => <span className="nowrap small">{fmtDate(s.window_start)} → {fmtDate(s.window_end)}</span> },
     { key: 'ccy', header: 'Ccy', render: (s) => <span className="ccy-tag">{s.currency}</span> },
     { key: 'state', header: 'State', render: (s) => <StatusChip status={s.state} /> },
-    {
-      key: 'net',
-      header: 'Net payout',
-      align: 'right',
-      render: (s) => <MoneyCell minor={s.net_payout_minor} currency={s.currency} />,
-    },
+    { key: 'net', header: 'Net payout', align: 'right', render: (s) => <MoneyCell minor={s.net_payout_minor} currency={s.currency} /> },
   ]
+
+  const needSetup = data?.quarantine?.unconfigured_merchants ?? 0
+  const merchantBalances = (accounts.data?.items ?? []).filter(
+    (a) => a.account_type === 'merchant_payable' || a.account_type === 'merchant_reserve',
+  )
 
   return (
     <div className="stack">
-      <div className="page-head">
-        <div>
-          <h1>Dashboard</h1>
-          <div className="sub">
-            {isMerchant ? user.merchant_name ?? 'Merchant overview' : 'Platform-wide settlement & ledger overview'}
-          </div>
-        </div>
-      </div>
-
-      {/* Integrity banner */}
-      {data && (
-        <div className={`banner ${data.integrity.ok ? 'green' : 'red'}`}>
-          <span className="shield">{data.integrity.ok ? '🛡' : '⚠'}</span>
-          <span>
-            {data.integrity.ok ? 'Ledger integrity verified' : 'Ledger integrity check FAILED'}{' '}
-            <span className="detail internal-only">
-              — {fmtInt(data.integrity.events)} events · {fmtInt(data.integrity.entries)} entries ·{' '}
-              {fmtInt(data.integrity.unbalanced_events)} unbalanced · {fmtInt(data.integrity.balance_mismatches)}{' '}
-              balance mismatches
-            </span>
+      <div className="page-head" style={{ marginBottom: 4, alignItems: 'center' }}>
+        <h1>{isMerchant ? user.merchant_name ?? 'Overview' : 'Dashboard'}</h1>
+        {data && (
+          <span className={`ledger-pill ${data.integrity.ok ? 'ok' : 'bad'}`}>
+            {data.integrity.ok ? '✓ Ledger balanced' : '⚠ Ledger check failed'}
+            {!isMerchant && data.integrity.ok && (
+              <Link to="/integrity" className="internal-only">Details</Link>
+            )}
           </span>
-          {!isMerchant && (
-            <Link to="/integrity" style={{ marginLeft: 'auto', fontWeight: 600, fontSize: 12.5 }}>
-              View checks →
-            </Link>
-          )}
-        </div>
-      )}
-
-      {/* Empty state — no data imported yet */}
-      {data && data.volume.length === 0 && data.merchant_count === 0 && (
-        <div className="card">
-          <EmptyState
-            title="No data yet"
-            hint={isMerchant ? 'Data will appear once the platform is loaded.' : 'Go to Upload & Verify to import processor files.'}
-            icon="⇪"
-          />
-          {!isMerchant && (
-            <div style={{ textAlign: 'center', paddingBottom: 22 }}>
-              <button className="btn primary" onClick={() => navigate('/upload')}>Go to Upload &amp; Verify →</button>
-            </div>
-          )}
-        </div>
-      )}
-
-      {/* Per-currency volume stat cards */}
-      <div className="grid grid-cards">
-        {loading && [1, 2, 3].map((i) => <SkeletonCard key={i} />)}
-        {data?.volume.map((v) => (
-          <div className="card stat-card" key={v.currency}>
-            <div className="label">
-              <span className="ccy-tag">{v.currency}</span> Captured volume
-            </div>
-            <div className="value">{fmtMoney(v.captured_minor, v.currency)}</div>
-            <div className="meta">
-              <span>
-                Fees {isMerchant ? 'charged' : 'earned'} <b>{fmtMoney(v.fees_minor, v.currency)}</b>
-              </span>
-              <span>
-                Net payable <b>{fmtMoney(v.net_payable_minor, v.currency)}</b>
-              </span>
-            </div>
-            <div className="meta">
-              <span>
-                Paid <b style={{ color: 'var(--green)' }}>{fmtInt(v.paid_count)}</b>
-              </span>
-              <span>
-                Declined <b style={{ color: 'var(--red)' }}>{fmtInt(v.declined_count)}</b>
-              </span>
-              <span>
-                Refunded <b>{fmtMoney(v.refunded_minor, v.currency)}</b>
-              </span>
-            </div>
-          </div>
-        ))}
-        {data && data.volume.length === 0 && (
-          <div className="card">
-            <EmptyState title="No volume yet" />
-          </div>
         )}
       </div>
 
-      {/* Merchant: available balances */}
-      {isMerchant && accounts.data && (
-        <div className="grid grid-cards">
-          {accounts.data.items
-            .filter((a) => a.account_type === 'merchant_payable' || a.account_type === 'merchant_reserve')
-            .map((a) => (
-              <div className="card stat-card" key={String(a.account_id)}>
-                <div className="label">
-                  <span className="ccy-tag">{a.currency}</span>
-                  {a.account_type === 'merchant_payable' ? 'Available (payable)' : 'Rolling reserve'}
-                </div>
-                <div className="value">
-                  <MoneyCell minor={a.balance_minor} currency={a.currency} />
-                </div>
-                <div className="meta">
-                  <Link to={`/ledger/accounts/${a.account_id}`} className="small">
-                    View statement →
-                  </Link>
-                </div>
-              </div>
-            ))}
-        </div>
+      {/* Needs-attention callout (admin) */}
+      {!isMerchant && needSetup > 0 && (
+        <Link to="/merchants" className="callout amber">
+          <span><b>{fmtInt(needSetup)}</b> merchant{needSetup === 1 ? '' : 's'} need fees set
+            {' '}· <b>{fmtInt(data?.quarantine?.quarantined_transactions ?? 0)}</b> transactions on hold</span>
+          <span className="go">Set up →</span>
+        </Link>
       )}
 
-      {/* Admin: platform summary strip */}
-      {!isMerchant && data && (
-        <div className="grid grid-cards">
+      {/* KPI tiles */}
+      <div className="grid grid-cards">
+        {loading && [1, 2, 3, 4].map((i) => <SkeletonCard key={i} />)}
+
+        {!isMerchant && data && (
           <div className="card stat-card">
             <div className="label">Merchants</div>
             <div className="value num">{fmtInt(data.merchant_count)}</div>
+            <div className="meta"><span>{fmtInt(data.merchant_count - needSetup)} active · {fmtInt(needSetup)} to set up</span></div>
           </div>
+        )}
+
+        {data && (
+          <div className="card stat-card">
+            <div className="label">Transactions</div>
+            <div className="value num">{fmtInt(totals.paid + totals.declined)}</div>
+            <div className="meta">
+              <span>Paid <b style={{ color: 'var(--green)' }}>{fmtInt(totals.paid)}</b></span>
+              <span>Declined <b>{fmtInt(totals.declined)}</b></span>
+            </div>
+          </div>
+        )}
+
+        {data && (
           <div className="card stat-card">
             <div className="label">Settlements</div>
             <div className="value num">{fmtInt(data.settlements.generated + data.settlements.completed)}</div>
             <div className="meta">
-              <span>
-                Generated <b>{fmtInt(data.settlements.generated)}</b>
-              </span>
-              <span>
-                Completed <b>{fmtInt(data.settlements.completed)}</b>
-              </span>
+              <span>Paid out <b>{fmtInt(data.settlements.completed)}</b></span>
+              <span>Pending <b>{fmtInt(data.settlements.generated)}</b></span>
             </div>
           </div>
+        )}
+
+        {!isMerchant && data && (
           <div className="card stat-card">
             <div className="label">Total paid out</div>
             <div className="value" style={{ fontSize: 18 }}>
@@ -186,16 +132,38 @@ export default function Dashboard() {
               </div>
             </div>
           </div>
-        </div>
-      )}
+        )}
+
+        {/* merchant: available + reserve balances */}
+        {isMerchant && merchantBalances.map((a) => (
+          <div className="card stat-card" key={String(a.account_id)}>
+            <div className="label">
+              <span className="ccy-tag">{a.currency}</span>
+              {a.account_type === 'merchant_payable' ? 'Available' : 'Reserve held'}
+            </div>
+            <div className="value"><MoneyCell minor={a.balance_minor} currency={a.currency} /></div>
+            <div className="meta"><Link to={`/ledger/accounts/${a.account_id}`} className="small">Statement →</Link></div>
+          </div>
+        ))}
+      </div>
+
+      {/* Money by currency — the recon table */}
+      <div className="card">
+        <div className="card-title">By currency</div>
+        <DataTable
+          columns={currencyCols}
+          rows={data?.volume ?? []}
+          rowKey={(v) => v.currency}
+          loading={loading}
+          empty={<EmptyState title="No volume yet" />}
+        />
+      </div>
 
       {/* Daily volume chart */}
       <div className="card">
         <div className="card-title">Daily captured volume</div>
         {loading ? (
-          <div className="chart-box">
-            <div className="skeleton" style={{ height: '100%' }} />
-          </div>
+          <div className="chart-box"><div className="skeleton" style={{ height: '100%' }} /></div>
         ) : (
           <VolumeChart rows={data?.daily_volume ?? []} />
         )}
@@ -205,10 +173,8 @@ export default function Dashboard() {
       {!isMerchant ? (
         <div className="card">
           <div className="card-title">
-            Top merchants by captured volume
-            <Link to="/merchants" className="small">
-              All merchants →
-            </Link>
+            Top merchants
+            <Link to="/merchants" className="small">All merchants →</Link>
           </div>
           <DataTable
             columns={topMerchantCols}
@@ -223,9 +189,7 @@ export default function Dashboard() {
         <div className="card">
           <div className="card-title">
             Recent settlements
-            <Link to="/settlements" className="small">
-              All settlements →
-            </Link>
+            <Link to="/settlements" className="small">All settlements →</Link>
           </div>
           <DataTable
             columns={recentSettlementCols}

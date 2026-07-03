@@ -373,6 +373,49 @@ table.data tbody tr.click:hover { background: #f8faff; }
 .banner .shield { font-size: 18px; }
 .banner .detail { font-weight: 400; opacity: 0.85; }
 
+/* slim ledger-status pill (page-head) */
+.ledger-pill {
+  display: inline-flex; align-items: center; gap: 8px;
+  font-size: 12px; font-weight: 600; white-space: nowrap;
+  padding: 4px 10px; border-radius: 999px; border: 1px solid;
+}
+.ledger-pill.ok { background: var(--green-bg); border-color: var(--green-border); color: var(--green); }
+.ledger-pill.bad { background: var(--red-bg); border-color: var(--red-border); color: var(--red); }
+.ledger-pill a { color: inherit; opacity: 0.7; font-weight: 600; }
+.ledger-pill a:hover { opacity: 1; }
+
+/* actionable callout (e.g. merchants needing setup) */
+.callout {
+  display: flex; align-items: center; justify-content: space-between; gap: 12px;
+  padding: 11px 16px; border-radius: var(--radius); border: 1px solid;
+  font-size: 13px; font-weight: 500; transition: box-shadow 0.12s;
+}
+.callout:hover { box-shadow: var(--shadow); text-decoration: none; }
+.callout.amber { background: var(--amber-bg); border-color: var(--amber-border); color: var(--amber); }
+.callout b { font-weight: 700; }
+.callout .go { font-weight: 700; white-space: nowrap; }
+
+/* table / list toolbar (search + filters) */
+.toolbar { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.toolbar .input { max-width: 340px; }
+
+/* segmented filter control */
+.seg { display: inline-flex; border: 1px solid var(--border-strong); border-radius: 8px; overflow: hidden; }
+.seg button {
+  font: inherit; font-size: 12.5px; font-weight: 600;
+  display: inline-flex; align-items: center; gap: 7px;
+  padding: 7px 13px; background: var(--surface); color: var(--ink-2);
+  border: none; border-left: 1px solid var(--border); cursor: pointer;
+}
+.seg button:first-child { border-left: none; }
+.seg button:hover { background: #f8faff; }
+.seg button.on { background: var(--brand-soft); color: var(--brand); }
+.seg button .c {
+  font-size: 11px; font-variant-numeric: tabular-nums;
+  background: var(--gray-bg); color: var(--gray); border-radius: 999px; padding: 0 6px;
+}
+.seg button.on .c { background: #fff; color: var(--brand); }
+
 /* ============ Forms / buttons ============ */
 
 .btn {

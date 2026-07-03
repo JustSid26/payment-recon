@@ -46,6 +46,7 @@ export interface TopMerchant {
 export interface Dashboard {
   volume: VolumeRow[]
   merchant_count: number
+  quarantine?: { unconfigured_merchants: number; quarantined_transactions: number }
   settlements: { generated: number; completed: number; total_paid_out: CurrencyAmount[] }
   integrity: { events: number; entries: number; unbalanced_events: number; balance_mismatches: number; ok: boolean }
   top_merchants: TopMerchant[]
@@ -67,6 +68,7 @@ export interface Merchant {
   status: string
   balances: MerchantBalance[]
   txn_count: number
+  quarantined_count?: number
   captured_minor_total: CurrencyAmount[]
 }
 
