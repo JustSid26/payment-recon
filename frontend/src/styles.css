@@ -395,6 +395,10 @@ table.data tbody tr.click:hover { background: #f8faff; }
 .callout b { font-weight: 700; }
 .callout .go { font-weight: 700; white-space: nowrap; }
 
+/* section header with a right-aligned control (e.g. cards/list toggle) */
+.section-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: -4px; }
+.section-head .st { font-size: 13px; font-weight: 600; color: var(--ink-2); }
+
 /* table / list toolbar (search + filters) */
 .toolbar { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
 .toolbar .input { max-width: 340px; }

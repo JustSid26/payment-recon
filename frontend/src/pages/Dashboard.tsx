@@ -1,9 +1,9 @@
-import { useMemo } from 'react'
+import { useMemo, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { api, getUser } from '../lib/api'
 import { useApi } from '../lib/useApi'
 import type { Dashboard as DashboardData, LedgerAccount, Settlement, VolumeRow } from '../lib/types'
-import { fmtDate, fmtInt } from '../lib/money'
+import { fmtDate, fmtInt, fmtMoney } from '../lib/money'
 import VolumeChart from '../components/VolumeChart'
 import { DataTable, EmptyState, MoneyCell, SkeletonCard, StatusChip, type Column } from '../components/ui'
 
@@ -13,6 +13,15 @@ export default function Dashboard() {
   const navigate = useNavigate()
 
   const { data, loading } = useApi(() => api<DashboardData>('/api/dashboard'), [])
+
+  // remembered "By currency" view preference (cards by default — easier to read)
+  const [ccyView, setCcyView] = useState<'cards' | 'list'>(
+    () => (localStorage.getItem('tw_ccy_view') === 'list' ? 'list' : 'cards'),
+  )
+  const chooseView = (v: 'cards' | 'list') => {
+    setCcyView(v)
+    localStorage.setItem('tw_ccy_view', v)
+  }
   const accounts = useApi(
     () => (isMerchant ? api<{ items: LedgerAccount[] }>('/api/ledger/accounts') : Promise.resolve(null)),
     [isMerchant],
@@ -147,16 +156,32 @@ export default function Dashboard() {
         ))}
       </div>
 
-      {/* Money by currency — the recon table */}
-      <div className="card">
-        <div className="card-title">By currency</div>
-        <DataTable
-          columns={currencyCols}
-          rows={data?.volume ?? []}
-          rowKey={(v) => v.currency}
-          loading={loading}
-          empty={<EmptyState title="No volume yet" />}
-        />
+      {/* Money by currency — cards or list, user's choice */}
+      <div>
+        <div className="section-head">
+          <span className="st">By currency</span>
+          <div className="seg">
+            <button className={ccyView === 'cards' ? 'on' : ''} onClick={() => chooseView('cards')}>Cards</button>
+            <button className={ccyView === 'list' ? 'on' : ''} onClick={() => chooseView('list')}>List</button>
+          </div>
+        </div>
+        {ccyView === 'list' ? (
+          <div className="card">
+            <DataTable
+              columns={currencyCols}
+              rows={data?.volume ?? []}
+              rowKey={(v) => v.currency}
+              loading={loading}
+              empty={<EmptyState title="No volume yet" />}
+            />
+          </div>
+        ) : (
+          <div className="grid grid-cards">
+            {loading && [1, 2, 3].map((i) => <SkeletonCard key={i} />)}
+            {(data?.volume ?? []).map((v) => <CurrencyCard key={v.currency} v={v} />)}
+            {data && data.volume.length === 0 && <div className="card"><EmptyState title="No volume yet" /></div>}
+          </div>
+        )}
       </div>
 
       {/* Daily volume chart */}
@@ -201,6 +226,24 @@ export default function Dashboard() {
           />
         </div>
       )}
+    </div>
+  )
+}
+
+function CurrencyCard({ v }: { v: VolumeRow }) {
+  return (
+    <div className="card stat-card">
+      <div className="label"><span className="ccy-tag">{v.currency}</span> Captured</div>
+      <div className="value"><MoneyCell minor={v.captured_minor} currency={v.currency} /></div>
+      <div className="meta">
+        <span>Fees <b>{fmtMoney(v.fees_minor, v.currency)}</b></span>
+        <span>Net payable <b>{fmtMoney(v.net_payable_minor, v.currency)}</b></span>
+      </div>
+      <div className="meta">
+        <span>Paid <b style={{ color: 'var(--green)' }}>{fmtInt(v.paid_count)}</b></span>
+        <span>Declined <b>{fmtInt(v.declined_count)}</b></span>
+        <span>Refunds <b>{fmtMoney(v.refunded_minor, v.currency)}</b></span>
+      </div>
     </div>
   )
 }
