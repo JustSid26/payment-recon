@@ -641,6 +641,18 @@ def settlement_detail(suuid: str, user: dict = Depends(current_user)):
                 "net_payout_minor": int(s["net_payout_minor"])}
 
 
+@app.get("/api/settlements/{suuid}/items")
+def settlement_line_items(suuid: str, user: dict = Depends(current_user)):
+    """Per-transaction charge breakdown for one settlement (admin + owning merchant)."""
+    with get_pool().connection() as conn:
+        cur = conn.cursor()
+        cur.execute("SELECT id, merchant_id FROM settlements WHERE settlement_uuid=%s", (suuid,))
+        s = cur.fetchone()
+        if s is None or (user["role"] == "merchant" and s["merchant_id"] != user["merchant_id"]):
+            err(404, "not_found", "settlement not found")
+        return {"items": settle_mod.line_items(conn, s["id"])}
+
+
 # ---------------------------------------------------------------- ledger
 @app.get("/api/ledger/accounts")
 def ledger_accounts(user: dict = Depends(current_user), merchant_uuid: str | None = None):

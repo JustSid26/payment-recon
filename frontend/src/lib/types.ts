@@ -213,6 +213,23 @@ export interface SettlementBreakdown {
   net_payout_minor: number
 }
 
+export interface SettlementLineItem {
+  occurred_at: string
+  type: string
+  reference: string
+  brand: string
+  last_four: string
+  status: string
+  gross_minor: number
+  mdr_minor: number
+  approved_fee_minor: number
+  declined_fee_minor: number
+  refund_fee_minor: number
+  chargeback_fee_minor: number
+  reserve_minor: number
+  net_minor: number
+}
+
 export interface SettlementDetail {
   settlement_uuid: string
   merchant_uuid?: string

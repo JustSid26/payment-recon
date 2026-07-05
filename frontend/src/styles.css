@@ -596,6 +596,60 @@ table.data tbody tr.click:hover { background: #f8faff; }
 }
 .statement-foot .usdc { display: flex; justify-content: space-between; font-variant-numeric: tabular-nums; }
 
+/* ---- statement toolbar: view toggle + export ---- */
+.statement-bar {
+  display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+  margin-bottom: 4px;
+}
+.statement-bar .export-group { margin-left: auto; display: flex; align-items: center; gap: 8px; }
+.statement-bar .export-label { font-size: 12px; color: var(--ink-3); font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em; }
+.export-btn {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 7px 12px; font-size: 13px; font-weight: 550;
+  border: 1px solid var(--border-strong); border-radius: var(--radius-sm);
+  background: var(--surface); color: var(--ink); cursor: pointer;
+}
+.export-btn:hover:not(:disabled) { background: #f8faff; border-color: var(--brand); color: var(--brand); }
+.export-btn:disabled { opacity: 0.5; cursor: default; }
+
+/* ---- per-transaction line items ---- */
+.lines-wrap { overflow-x: auto; }
+.lines-table { width: 100%; border-collapse: collapse; font-size: 13px; white-space: nowrap; }
+.lines-table th, .lines-table td { padding: 9px 14px; text-align: right; font-variant-numeric: tabular-nums; }
+.lines-table th {
+  position: sticky; top: 0; background: #f9fafb; z-index: 1;
+  font-size: 11px; letter-spacing: 0.02em; text-transform: uppercase;
+  color: var(--ink-3); font-weight: 700; border-bottom: 1px solid var(--border);
+}
+.lines-table th.l, .lines-table td.l { text-align: left; }
+.lines-table td { border-bottom: 1px solid var(--border); color: var(--ink-2); }
+.lines-table tbody tr:hover { background: #f8faff; }
+.lines-table td.strong { color: var(--ink); font-weight: 600; }
+.lines-table td.zero { color: var(--ink-3); }
+.lines-table tfoot td {
+  border-top: 2px solid var(--border-strong); font-weight: 700;
+  color: var(--ink); background: #f9fafb;
+}
+.lines-table .ref { font-family: var(--mono, ui-monospace, monospace); font-size: 12px; }
+
+/* ============ Print → PDF (statement only) ============ */
+@media print {
+  body.printing-statement .sidebar,
+  body.printing-statement .topbar,
+  body.printing-statement .app-footer,
+  body.printing-statement .back-link,
+  body.printing-statement .head-actions,
+  body.printing-statement .statement-bar { display: none !important; }
+  body.printing-statement .shell,
+  body.printing-statement .content,
+  body.printing-statement .main { display: block; margin: 0; padding: 0; background: #fff; }
+  body.printing-statement [data-print="hide"] { display: none !important; }
+  body.printing-statement .card.statement {
+    box-shadow: none; border: 1px solid #ddd; max-width: none; margin: 0;
+  }
+  @page { margin: 16mm; }
+}
+
 /* ============ Integrity ============ */
 
 .integrity-row {
