@@ -38,9 +38,11 @@
   --series-3: #eda100;
   --series-4: #4a3aa7;
 
-  --radius: 10px;
-  --shadow: 0 1px 2px rgba(16, 24, 40, 0.05);
-  --shadow-lg: 0 12px 32px rgba(16, 24, 40, 0.16);
+  --radius: 16px;
+  --radius-sm: 10px;
+  /* soft, layered lift (inspired by the lead-gen panels, kept in our ink color) */
+  --shadow: 0 1px 2px rgba(16, 24, 40, 0.04), 0 8px 26px rgba(16, 24, 40, 0.05);
+  --shadow-lg: 0 24px 60px rgba(16, 24, 40, 0.18);
 
   --font: 'Inter', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
 }
@@ -267,9 +269,10 @@ body.presentation .internal-only { display: none !important; }
   border: 1px solid var(--border);
   border-radius: var(--radius);
   box-shadow: var(--shadow);
+  overflow: hidden; /* clip inner tables/headers to the rounded corners */
 }
 
-.card-pad { padding: 18px 20px; }
+.card-pad { padding: 20px 22px; }
 
 .card-title {
   font-size: 13px; font-weight: 600; color: var(--ink-2);
@@ -418,7 +421,7 @@ table.data tbody tr.click:hover { background: #f8faff; }
 .preset-save .input { flex: 1; }
 
 /* segmented filter control */
-.seg { display: inline-flex; border: 1px solid var(--border-strong); border-radius: 8px; overflow: hidden; }
+.seg { display: inline-flex; border: 1px solid var(--border-strong); border-radius: var(--radius-sm); overflow: hidden; }
 .seg button {
   font: inherit; font-size: 12.5px; font-weight: 600;
   display: inline-flex; align-items: center; gap: 7px;
@@ -439,7 +442,7 @@ table.data tbody tr.click:hover { background: #f8faff; }
 .btn {
   display: inline-flex; align-items: center; gap: 7px;
   font: inherit; font-weight: 600; font-size: 13px;
-  padding: 8px 14px; border-radius: 8px; cursor: pointer;
+  padding: 8px 14px; border-radius: var(--radius-sm); cursor: pointer;
   border: 1px solid var(--border-strong);
   background: var(--surface); color: var(--ink);
   transition: background 0.12s, border-color 0.12s;
@@ -454,7 +457,7 @@ table.data tbody tr.click:hover { background: #f8faff; }
 
 .input, .select {
   font: inherit; font-size: 13px;
-  padding: 8px 11px; border-radius: 8px;
+  padding: 8px 11px; border-radius: var(--radius-sm);
   border: 1px solid var(--border-strong);
   background: var(--surface); color: var(--ink);
   outline: none;
@@ -610,7 +613,7 @@ table.data tbody tr.click:hover { background: #f8faff; }
   padding: 24px;
 }
 .modal {
-  background: var(--surface); border-radius: 12px;
+  background: var(--surface); border-radius: 18px;
   box-shadow: var(--shadow-lg);
   width: 440px; max-width: 100%;
   max-height: 90vh; overflow: auto;
