@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { Modal, toastError, toastSuccess } from './ui'
+import { Modal, toastError } from './ui'
 import { api, ApiError } from '../lib/api'
 import { useApi } from '../lib/useApi'
 import type { FeeSchedule, SavedPreset } from '../lib/types'
@@ -86,6 +86,7 @@ export function FeeScheduleModal({
   subtitle,
   saveLabel = 'Save',
   initial,
+  showName,
   onClose,
   onSubmit,
 }: {
@@ -93,18 +94,22 @@ export function FeeScheduleModal({
   subtitle?: string
   saveLabel?: string
   initial?: FeeForm
+  showName?: boolean
   onClose: () => void
-  onSubmit: (rates: FeeRates) => Promise<void>
+  onSubmit: (rates: FeeRates, name: string) => Promise<void>
 }) {
   const [f, setF] = useState<FeeForm>(initial ?? EMPTY_FEE_FORM)
+  const [name, setName] = useState('')
   const [busy, setBusy] = useState(false)
   const [msg, setMsg] = useState<string | null>(null)
-  const [presetName, setPresetName] = useState('')
-  const [savingPreset, setSavingPreset] = useState(false)
   const presets = useApi(() => api<{ items: SavedPreset[] }>('/api/fee-presets'), [])
   const set = (k: keyof FeeForm, v: string) => setF((p) => ({ ...p, [k]: v }))
 
   const save = async () => {
+    if (showName && !name.trim()) {
+      setMsg('Enter a preset name.')
+      return
+    }
     if (f.mdrPct === '' || Number.isNaN(parseFloat(f.mdrPct))) {
       setMsg('Enter an MDR percentage (e.g. 3 for 3%).')
       return
@@ -112,30 +117,14 @@ export function FeeScheduleModal({
     setBusy(true)
     setMsg(null)
     try {
-      await onSubmit(buildRates(f))
+      await onSubmit(buildRates(f), name.trim())
       onClose()
     } catch (e) {
-      const m = e instanceof ApiError ? e.message : 'Failed to save fee schedule'
+      const m = e instanceof ApiError ? e.message : 'Failed to save'
       setMsg(m)
       toastError(m)
     } finally {
       setBusy(false)
-    }
-  }
-
-  const savePreset = async () => {
-    const name = presetName.trim()
-    if (!name) return
-    setSavingPreset(true)
-    try {
-      await api('/api/fee-presets', { method: 'POST', body: { name, ...buildRates(f) } })
-      toastSuccess(`Preset "${name}" saved`)
-      setPresetName('')
-      presets.reload()
-    } catch (e) {
-      toastError(e instanceof ApiError ? e.message : 'Failed to save preset')
-    } finally {
-      setSavingPreset(false)
     }
   }
 
@@ -157,8 +146,15 @@ export function FeeScheduleModal({
       {subtitle && <div className="dim small">{subtitle}</div>}
       {msg && <div className="form-error">{msg}</div>}
 
+      {showName && (
+        <div className="field">
+          <label>Preset name</label>
+          <input className="input" placeholder="e.g. High-risk AUD" value={name} onChange={(e) => setName(e.target.value)} />
+        </div>
+      )}
+
       <div className="field">
-        <label>Load a saved preset</label>
+        <label>{showName ? 'Start from a preset' : 'Load a saved preset'}</label>
         <select
           className="select"
           defaultValue=""
@@ -182,19 +178,6 @@ export function FeeScheduleModal({
         <Field label="Refund fee" value={f.refundFee} on={(v) => set('refundFee', v)} ph="0.00" />
         <Field label="Chargeback fee" value={f.chargebackFee} on={(v) => set('chargebackFee', v)} ph="0.00" />
         <Field label="Settlement delay (T+days)" value={f.delayDays} on={(v) => set('delayDays', v)} ph="0" num />
-      </div>
-
-      {/* Save the current config as a reusable named preset */}
-      <div className="preset-save">
-        <input
-          className="input"
-          placeholder="Save as preset (name)…"
-          value={presetName}
-          onChange={(e) => setPresetName(e.target.value)}
-        />
-        <button className="btn sm" onClick={() => void savePreset()} disabled={savingPreset || !presetName.trim()}>
-          {savingPreset ? 'Saving…' : 'Save preset'}
-        </button>
       </div>
       <div className="dim small">Fixed fees are in the merchant's settlement currency.</div>
     </Modal>

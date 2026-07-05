@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState } from 'react'
+import { Fragment, useMemo, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { api } from '../lib/api'
 import { useApi } from '../lib/useApi'
@@ -17,6 +17,7 @@ export default function Merchants() {
   const [filter, setFilter] = useState<Filter>('all')
   const [selected, setSelected] = useState<Set<string>>(new Set())
   const [showFees, setShowFees] = useState(false)
+  const [showCreate, setShowCreate] = useState(false)
 
   const items = data?.items ?? []
   const counts = useMemo(() => ({
@@ -60,6 +61,11 @@ export default function Merchants() {
     toastSuccess(`Fees applied to ${res.applied} merchant${res.applied === 1 ? '' : 's'}${res.failed ? ` · ${res.failed} failed` : ''}`)
     setSelected(new Set())
     reload()
+  }
+
+  const createPreset = async (rates: FeeRates, name: string) => {
+    await api('/api/fee-presets', { method: 'POST', body: { name, ...rates } })
+    toastSuccess(`Preset "${name}" created`)
   }
 
   const cols: Column<Merchant>[] = [
@@ -115,9 +121,12 @@ export default function Merchants() {
             </button>
           ))}
         </div>
-        <button className="btn primary" style={{ marginLeft: 'auto' }} disabled={selected.size === 0} onClick={() => setShowFees(true)}>
-          Set fee schedule{selected.size > 0 ? ` (${selected.size})` : ''}
-        </button>
+        <div style={{ marginLeft: 'auto', display: 'flex', gap: 8 }}>
+          <button className="btn" onClick={() => setShowCreate(true)}>Create preset</button>
+          <button className="btn primary" disabled={selected.size === 0} onClick={() => setShowFees(true)}>
+            Set fee schedule{selected.size > 0 ? ` (${selected.size})` : ''}
+          </button>
+        </div>
       </div>
 
       {selected.size > 0 && (
@@ -148,6 +157,17 @@ export default function Merchants() {
           onSubmit={applyBulkFees}
         />
       )}
+
+      {showCreate && (
+        <FeeScheduleModal
+          title="Create fee preset"
+          subtitle="Save a reusable named fee config. It won't change any merchant until you apply it."
+          saveLabel="Create preset"
+          showName
+          onClose={() => setShowCreate(false)}
+          onSubmit={createPreset}
+        />
+      )}
     </div>
   )
 }
@@ -164,10 +184,10 @@ function CcyStack({ rows }: { rows: { currency: string; minor: number }[] }) {
   return (
     <div className="ccy-stack">
       {sorted.map((r) => (
-        <div className="ccy-line" key={r.currency}>
+        <Fragment key={r.currency}>
           <span className="ccy-tag">{r.currency}</span>
           <span className={`money${r.minor < 0 ? ' neg' : ''}`}>{fmtMoney(r.minor, r.currency)}</span>
-        </div>
+        </Fragment>
       ))}
     </div>
   )
