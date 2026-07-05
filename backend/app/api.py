@@ -279,6 +279,39 @@ def set_fee_schedule(muuid: str, body: FeeScheduleBody, user: dict = Depends(req
         return summary
 
 
+class BulkFeeScheduleBody(FeeScheduleBody):
+    merchant_uuids: list[str]
+
+
+@app.post("/api/merchants/fee-schedule/bulk")
+def bulk_set_fee_schedule(body: BulkFeeScheduleBody, user: dict = Depends(require_admin)):
+    """Assign one fee schedule to many merchants at once (onboarding each)."""
+    overrides = {k: v for k, v in body.model_dump().items()
+                 if k not in ("preset", "merchant_uuids") and v is not None}
+    try:
+        rates = onboarding_mod.resolve_rates(preset=body.preset, overrides=overrides)
+    except ValueError as e:
+        err(400, "invalid_rates", str(e))
+    results, errors = [], []
+    for muuid in body.merchant_uuids:
+        with get_pool().connection() as conn:
+            cur = conn.cursor()
+            cur.execute("SELECT id FROM merchants WHERE merchant_uuid=%s", (muuid,))
+            m = cur.fetchone()
+            if m is None:
+                errors.append({"merchant_uuid": muuid, "error": "not found"})
+                continue
+            try:
+                s = onboarding_mod.assign_fee_schedule(conn, m["id"], rates)
+                results.append({"merchant_uuid": muuid,
+                                "transactions_posted": s["transactions_posted"]})
+            except ValueError as e:
+                errors.append({"merchant_uuid": muuid, "error": str(e)})
+            conn.commit()
+    return {"applied": len(results), "failed": len(errors),
+            "results": results, "errors": errors}
+
+
 @app.get("/api/merchants/{muuid}")
 def merchant_detail(muuid: str, user: dict = Depends(current_user)):
     with get_pool().connection() as conn:
