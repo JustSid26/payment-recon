@@ -312,6 +312,59 @@ def bulk_set_fee_schedule(body: BulkFeeScheduleBody, user: dict = Depends(requir
             "results": results, "errors": errors}
 
 
+# ---------------------------------------------------------------- fee presets
+_PRESET_FIELDS = ("mdr_bps", "approved_txn_fee_minor", "declined_txn_fee_minor",
+                  "refund_fee_minor", "chargeback_fee_minor", "reserve_hold_bps",
+                  "reserve_hold_days", "settlement_fee_bps", "settlement_delay_days",
+                  "settlement_schedule")
+
+
+@app.get("/api/fee-presets")
+def list_fee_presets(user: dict = Depends(current_user)):
+    with get_pool().connection() as conn:
+        cur = conn.cursor()
+        cur.execute("SELECT * FROM fee_presets ORDER BY name")
+        return {"items": [{k: r[k] for k in ("name", *_PRESET_FIELDS)} for r in cur.fetchall()]}
+
+
+class SavePresetBody(FeeScheduleBody):
+    name: str
+
+
+@app.post("/api/fee-presets")
+def save_fee_preset(body: SavePresetBody, user: dict = Depends(require_admin)):
+    """Create or update a named fee preset from a config (validated)."""
+    name = body.name.strip()
+    if not name:
+        err(400, "bad_name", "preset name is required")
+    overrides = {k: v for k, v in body.model_dump().items()
+                 if k not in ("preset", "name") and v is not None}
+    try:
+        rates = onboarding_mod.resolve_rates(preset=body.preset, overrides=overrides)
+    except ValueError as e:
+        err(400, "invalid_rates", str(e))
+    with get_pool().connection() as conn:
+        cur = conn.cursor()
+        cols = ", ".join(("name", *_PRESET_FIELDS))
+        ph = ", ".join(["%s"] * (1 + len(_PRESET_FIELDS)))
+        upd = ", ".join(f"{c}=EXCLUDED.{c}" for c in _PRESET_FIELDS)
+        cur.execute(
+            f"INSERT INTO fee_presets ({cols}) VALUES ({ph}) "
+            f"ON CONFLICT (name) DO UPDATE SET {upd}",
+            (name, *[rates[c] for c in _PRESET_FIELDS]),
+        )
+        conn.commit()
+    return {"name": name}
+
+
+@app.delete("/api/fee-presets/{name}")
+def delete_fee_preset(name: str, user: dict = Depends(require_admin)):
+    with get_pool().connection() as conn:
+        conn.cursor().execute("DELETE FROM fee_presets WHERE name=%s", (name,))
+        conn.commit()
+    return {"deleted": name}
+
+
 @app.get("/api/merchants/{muuid}")
 def merchant_detail(muuid: str, user: dict = Depends(current_user)):
     with get_pool().connection() as conn:

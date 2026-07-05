@@ -219,3 +219,25 @@ CREATE INDEX IF NOT EXISTS ix_txn_quarantined
 ALTER TABLE transactions DROP CONSTRAINT IF EXISTS transactions_upstream_payment_id_key;
 CREATE UNIQUE INDEX IF NOT EXISTS ux_txn_merchant_payment
   ON transactions (merchant_id, upstream_payment_id);
+
+-- Reusable, named fee presets (e.g. Workbook, Canamoney) for onboarding merchants.
+CREATE TABLE IF NOT EXISTS fee_presets (
+  name                    TEXT PRIMARY KEY,
+  mdr_bps                 INT NOT NULL,
+  approved_txn_fee_minor  BIGINT NOT NULL,
+  declined_txn_fee_minor  BIGINT NOT NULL,
+  refund_fee_minor        BIGINT NOT NULL,
+  chargeback_fee_minor    BIGINT NOT NULL,
+  reserve_hold_bps        INT NOT NULL,
+  reserve_hold_days       INT NOT NULL,
+  settlement_fee_bps      INT NOT NULL,
+  settlement_delay_days   INT NOT NULL DEFAULT 0,
+  settlement_schedule     TEXT NOT NULL DEFAULT 'daily',
+  created_at              TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+INSERT INTO fee_presets (name, mdr_bps, approved_txn_fee_minor, declined_txn_fee_minor,
+    refund_fee_minor, chargeback_fee_minor, reserve_hold_bps, reserve_hold_days,
+    settlement_fee_bps, settlement_delay_days, settlement_schedule) VALUES
+  ('Workbook',  500, 30,  0, 4000, 7000,  500, 180, 100, 0, 'daily'),
+  ('Canamoney', 650, 35, 10, 1000, 7000, 1000, 180, 100, 0, 'daily')
+ON CONFLICT (name) DO NOTHING;
