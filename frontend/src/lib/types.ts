@@ -88,6 +88,20 @@ export interface MerchantDetail extends Merchant {
   fee_schedule: FeeSchedule
 }
 
+export interface SavedPreset {
+  name: string
+  mdr_bps: number
+  approved_txn_fee_minor: number
+  declined_txn_fee_minor: number
+  refund_fee_minor: number
+  chargeback_fee_minor: number
+  reserve_hold_bps: number
+  reserve_hold_days: number
+  settlement_fee_bps: number
+  settlement_delay_days: number
+  settlement_schedule: string
+}
+
 export interface ReserveStatementRow {
   date: string
   opening_minor: number

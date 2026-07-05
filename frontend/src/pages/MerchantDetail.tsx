@@ -20,28 +20,11 @@ import {
   toastSuccess,
   type Column,
 } from '../components/ui'
+import { FeeScheduleModal, feeFormFromSchedule, type FeeRates } from '../components/FeeScheduleModal'
 
 function bps(n: number | null | undefined): string {
   if (n == null || Number.isNaN(n)) return '—'
   return `${(n / 100).toFixed(2).replace(/\.?0+$/, '')}%`
-}
-
-// Quick-fill presets for the fee form (values in human units: %, major currency).
-const FEE_PRESETS: Record<string, FeeForm> = {
-  workbook: { mdrPct: '5', approvedFee: '0.30', declinedFee: '0', refundFee: '40',
-    chargebackFee: '70', reservePct: '5', reserveDays: '180', settlementPct: '1', delayDays: '0' },
-  annex: { mdrPct: '6.5', approvedFee: '0.35', declinedFee: '0.10', refundFee: '10',
-    chargebackFee: '70', reservePct: '10', reserveDays: '180', settlementPct: '1', delayDays: '0' },
-}
-
-interface FeeForm {
-  mdrPct: string; approvedFee: string; declinedFee: string; refundFee: string
-  chargebackFee: string; reservePct: string; reserveDays: string; settlementPct: string; delayDays: string
-}
-
-const EMPTY_FEE_FORM: FeeForm = {
-  mdrPct: '', approvedFee: '', declinedFee: '', refundFee: '',
-  chargebackFee: '', reservePct: '', reserveDays: '180', settlementPct: '', delayDays: '0',
 }
 
 export default function MerchantDetailPage() {
@@ -108,78 +91,22 @@ export default function MerchantDetailPage() {
     }
   }
 
-  // ---- Fee schedule editor ----
+  // ---- Fee schedule editor (uses the shared modal) ----
   const [showFee, setShowFee] = useState(false)
-  const [feeForm, setFeeForm] = useState<FeeForm>(EMPTY_FEE_FORM)
-  const [feeBusy, setFeeBusy] = useState(false)
-  const [feeMsg, setFeeMsg] = useState<string | null>(null)
 
-  const openFee = () => {
-    const fs = merchant?.fee_schedule
-    // prefill from the existing schedule (convert bps→%, minor→major) when configured
-    setFeeForm(
-      fs && fs.mdr_bps != null
-        ? {
-            mdrPct: String(fs.mdr_bps / 100),
-            approvedFee: (fs.approved_txn_fee_minor / 100).toFixed(2),
-            declinedFee: (fs.declined_txn_fee_minor / 100).toFixed(2),
-            refundFee: (fs.refund_fee_minor / 100).toFixed(2),
-            chargebackFee: (fs.chargeback_fee_minor / 100).toFixed(2),
-            reservePct: String(fs.reserve_hold_bps / 100),
-            reserveDays: String(fs.reserve_hold_days),
-            settlementPct: String(fs.settlement_fee_bps / 100),
-            delayDays: '0',
-          }
-        : EMPTY_FEE_FORM,
+  const saveFee = async (rates: FeeRates) => {
+    const res = await api<{ transactions_posted: number }>(
+      `/api/merchants/${uuid}/fee-schedule`,
+      { method: 'POST', body: rates },
     )
-    setFeeMsg(null)
-    setShowFee(true)
-  }
-
-  const setFF = (k: keyof FeeForm, v: string) => setFeeForm((f) => ({ ...f, [k]: v }))
-  const pct = (s: string) => Math.round(parseFloat(s || '0') * 100)
-  const minor = (s: string) => Math.round(parseFloat(s || '0') * 100)
-
-  const doSaveFee = async () => {
-    if (feeForm.mdrPct === '' || Number.isNaN(parseFloat(feeForm.mdrPct))) {
-      setFeeMsg('Enter an MDR percentage (e.g. 3 for 3%).')
-      return
-    }
-    setFeeBusy(true)
-    setFeeMsg(null)
-    try {
-      const res = await api<{ transactions_posted: number }>(
-        `/api/merchants/${uuid}/fee-schedule`,
-        {
-          method: 'POST',
-          body: {
-            mdr_bps: pct(feeForm.mdrPct),
-            approved_txn_fee_minor: minor(feeForm.approvedFee),
-            declined_txn_fee_minor: minor(feeForm.declinedFee),
-            refund_fee_minor: minor(feeForm.refundFee),
-            chargeback_fee_minor: minor(feeForm.chargebackFee),
-            reserve_hold_bps: pct(feeForm.reservePct),
-            reserve_hold_days: parseInt(feeForm.reserveDays || '180', 10),
-            settlement_fee_bps: pct(feeForm.settlementPct),
-            settlement_delay_days: parseInt(feeForm.delayDays || '0', 10),
-            settlement_schedule: 'daily',
-          },
-        },
-      )
-      toastSuccess(
-        res.transactions_posted > 0
-          ? `Fees saved — ${fmtInt(res.transactions_posted)} transactions posted to the ledger`
-          : 'Fee schedule saved',
-      )
-      setShowFee(false)
-      reloadMerchant()
-      settlements.reload()
-      reserve.reload()
-    } catch (e) {
-      setFeeMsg(e instanceof ApiError ? e.message : 'Failed to save fee schedule')
-    } finally {
-      setFeeBusy(false)
-    }
+    toastSuccess(
+      res.transactions_posted > 0
+        ? `Fees saved — ${fmtInt(res.transactions_posted)} transactions posted to the ledger`
+        : 'Fee schedule saved',
+    )
+    reloadMerchant()
+    settlements.reload()
+    reserve.reload()
   }
 
   const settlementCols: Column<Settlement>[] = [
@@ -275,7 +202,7 @@ export default function MerchantDetailPage() {
         <div className="card">
           <div className="card-title">
             Fee schedule
-            <button className="btn" style={{ padding: '4px 10px', fontSize: 12 }} onClick={openFee}>
+            <button className="btn" style={{ padding: '4px 10px', fontSize: 12 }} onClick={() => setShowFee(true)}>
               {configured ? 'Edit fees' : 'Set fees'}
             </button>
           </div>
@@ -399,90 +326,18 @@ export default function MerchantDetailPage() {
         </Modal>
       )}
 
-      {/* Fee schedule editor modal */}
+      {/* Fee schedule editor modal (shared) */}
       {showFee && (
-        <Modal
+        <FeeScheduleModal
           title={configured ? 'Edit fee schedule' : `Set fees — ${merchant.name}`}
+          subtitle={configured
+            ? 'Rate changes apply to transactions posted from now on — the ledger is append-only.'
+            : `Setting fees onboards ${merchant.name}: its ${fmtInt(merchant.txn_count)} held transactions are posted to the ledger at these rates.`}
+          saveLabel={configured ? 'Save' : 'Save & onboard'}
+          initial={configured ? feeFormFromSchedule(fs) : undefined}
           onClose={() => setShowFee(false)}
-          footer={
-            <>
-              <button className="btn" onClick={() => setShowFee(false)} disabled={feeBusy}>Cancel</button>
-              <button className="btn primary" onClick={() => void doSaveFee()} disabled={feeBusy}>
-                {feeBusy ? 'Saving…' : configured ? 'Save' : 'Save & onboard'}
-              </button>
-            </>
-          }
-        >
-          <div className="dim small">
-            {configured
-              ? 'Rate changes apply to transactions posted from now on — the ledger is append-only.'
-              : `Setting fees onboards ${merchant.name}: its ${fmtInt(merchant.txn_count)} held transactions are posted to the ledger at these rates.`}
-          </div>
-          {feeMsg && <div className="form-error">{feeMsg}</div>}
-          <div className="field">
-            <label>Quick-fill preset</label>
-            <select
-              className="select"
-              defaultValue=""
-              onChange={(e) => {
-                const p = FEE_PRESETS[e.target.value]
-                if (p) setFeeForm(p)
-              }}
-            >
-              <option value="">Custom…</option>
-              <option value="workbook">Workbook (5% MDR)</option>
-              <option value="annex">Annex / Canamoney (6.5% MDR)</option>
-            </select>
-          </div>
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
-            <div className="field">
-              <label>MDR (%)</label>
-              <input className="input" inputMode="decimal" value={feeForm.mdrPct}
-                onChange={(e) => setFF('mdrPct', e.target.value)} placeholder="e.g. 3" />
-            </div>
-            <div className="field">
-              <label>Settlement fee (%)</label>
-              <input className="input" inputMode="decimal" value={feeForm.settlementPct}
-                onChange={(e) => setFF('settlementPct', e.target.value)} placeholder="e.g. 1" />
-            </div>
-            <div className="field">
-              <label>Rolling reserve (%)</label>
-              <input className="input" inputMode="decimal" value={feeForm.reservePct}
-                onChange={(e) => setFF('reservePct', e.target.value)} placeholder="e.g. 5" />
-            </div>
-            <div className="field">
-              <label>Reserve hold (days)</label>
-              <input className="input" inputMode="numeric" value={feeForm.reserveDays}
-                onChange={(e) => setFF('reserveDays', e.target.value)} placeholder="180" />
-            </div>
-            <div className="field">
-              <label>Approved txn fee</label>
-              <input className="input" inputMode="decimal" value={feeForm.approvedFee}
-                onChange={(e) => setFF('approvedFee', e.target.value)} placeholder="0.30" />
-            </div>
-            <div className="field">
-              <label>Declined txn fee</label>
-              <input className="input" inputMode="decimal" value={feeForm.declinedFee}
-                onChange={(e) => setFF('declinedFee', e.target.value)} placeholder="0.00" />
-            </div>
-            <div className="field">
-              <label>Refund fee</label>
-              <input className="input" inputMode="decimal" value={feeForm.refundFee}
-                onChange={(e) => setFF('refundFee', e.target.value)} placeholder="0.00" />
-            </div>
-            <div className="field">
-              <label>Chargeback fee</label>
-              <input className="input" inputMode="decimal" value={feeForm.chargebackFee}
-                onChange={(e) => setFF('chargebackFee', e.target.value)} placeholder="0.00" />
-            </div>
-            <div className="field">
-              <label>Settlement delay (T+days)</label>
-              <input className="input" inputMode="numeric" value={feeForm.delayDays}
-                onChange={(e) => setFF('delayDays', e.target.value)} placeholder="0" />
-            </div>
-          </div>
-          <div className="dim small">Fixed fees are in the merchant's settlement currency.</div>
-        </Modal>
+          onSubmit={saveFee}
+        />
       )}
     </div>
   )

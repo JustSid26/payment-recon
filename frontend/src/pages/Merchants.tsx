@@ -160,10 +160,11 @@ function SelectAll({ checked, indeterminate, onChange }: { checked: boolean; ind
 
 function CcyStack({ rows }: { rows: { currency: string; minor: number }[] }) {
   if (rows.length === 0) return <span className="dim">—</span>
+  const sorted = [...rows].sort((a, b) => a.currency.localeCompare(b.currency))
   return (
-    <div className="mini-rows" style={{ alignItems: 'flex-end' }}>
-      {rows.map((r) => (
-        <div className="mini-row" key={r.currency}>
+    <div className="ccy-stack">
+      {sorted.map((r) => (
+        <div className="ccy-line" key={r.currency}>
           <span className="ccy-tag">{r.currency}</span>
           <span className={`money${r.minor < 0 ? ' neg' : ''}`}>{fmtMoney(r.minor, r.currency)}</span>
         </div>
