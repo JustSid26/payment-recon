@@ -46,7 +46,7 @@ export function MoneyCell({
 export interface Column<T> {
   key: string
   header: ReactNode
-  render: (row: T) => ReactNode
+  render: (row: T, index: number) => ReactNode
   align?: 'left' | 'right'
 }
 
@@ -90,7 +90,7 @@ export function DataTable<T>({
                   ))}
                 </tr>
               ))
-            : rows.map((row) => (
+            : rows.map((row, i) => (
                 <tr
                   key={rowKey(row)}
                   className={onRowClick ? 'click' : undefined}
@@ -98,7 +98,7 @@ export function DataTable<T>({
                 >
                   {columns.map((c) => (
                     <td key={c.key} className={c.align === 'right' ? 'ta-r' : undefined}>
-                      {c.render(row)}
+                      {c.render(row, i)}
                     </td>
                   ))}
                 </tr>
