@@ -102,8 +102,16 @@ export function FeeScheduleModal({
   const [name, setName] = useState('')
   const [busy, setBusy] = useState(false)
   const [msg, setMsg] = useState<string | null>(null)
+  const [presetSel, setPresetSel] = useState('')
   const presets = useApi(() => api<{ items: SavedPreset[] }>('/api/fee-presets'), [])
   const set = (k: keyof FeeForm, v: string) => setF((p) => ({ ...p, [k]: v }))
+
+  const clearAll = () => {
+    setF(EMPTY_FEE_FORM)
+    setName('')
+    setPresetSel('')
+    setMsg(null)
+  }
 
   const save = async () => {
     if (showName && !name.trim()) {
@@ -136,6 +144,9 @@ export function FeeScheduleModal({
       onClose={onClose}
       footer={
         <>
+          <button className="btn" onClick={clearAll} disabled={busy} style={{ marginRight: 'auto' }}>
+            Clear all
+          </button>
           <button className="btn" onClick={onClose} disabled={busy}>Cancel</button>
           <button className="btn primary" onClick={() => void save()} disabled={busy}>
             {busy ? 'Saving…' : saveLabel}
@@ -157,8 +168,9 @@ export function FeeScheduleModal({
         <label>{showName ? 'Start from a preset' : 'Load a saved preset'}</label>
         <select
           className="select"
-          defaultValue=""
+          value={presetSel}
           onChange={(e) => {
+            setPresetSel(e.target.value)
             const p = items.find((x) => x.name === e.target.value)
             if (p) setF(presetToForm(p))
           }}
