@@ -5,21 +5,21 @@ import { Modal, toastError, toastSuccess } from './ui'
 import type { AdminStatus } from '../lib/types'
 
 const ADMIN_NAV = [
-  { to: '/upload', label: 'Upload & Verify', icon: '⇪' },
-  { to: '/', label: 'Dashboard', icon: '▦', end: true },
-  { to: '/merchants', label: 'Merchants', icon: '◫' },
-  { to: '/transactions', label: 'Transactions', icon: '⇄' },
-  { to: '/settlements', label: 'Settlements', icon: '⇊' },
-  { to: '/ledger', label: 'Ledger', icon: '≡' },
-  { to: '/integrity', label: 'Integrity', icon: '✓' },
+  { to: '/upload', label: 'Upload & Verify', icon: 'upload_file' },
+  { to: '/', label: 'Dashboard', icon: 'dashboard', end: true },
+  { to: '/merchants', label: 'Merchants', icon: 'storefront' },
+  { to: '/transactions', label: 'Transactions', icon: 'receipt_long' },
+  { to: '/settlements', label: 'Settlements', icon: 'payments' },
+  { to: '/ledger', label: 'Ledger', icon: 'account_balance_wallet' },
+  { to: '/integrity', label: 'Integrity', icon: 'verified_user' },
 ]
 
 const MERCHANT_NAV = [
-  { to: '/', label: 'Dashboard', icon: '▦', end: true },
-  { to: '/transactions', label: 'Transactions', icon: '⇄' },
-  { to: '/settlements', label: 'Settlements', icon: '⇊' },
-  { to: '/reserve', label: 'Reserve', icon: '◍' },
-  { to: '/ledger', label: 'Ledger', icon: '≡' },
+  { to: '/', label: 'Dashboard', icon: 'dashboard', end: true },
+  { to: '/transactions', label: 'Transactions', icon: 'receipt_long' },
+  { to: '/settlements', label: 'Settlements', icon: 'payments' },
+  { to: '/reserve', label: 'Reserve', icon: 'savings' },
+  { to: '/ledger', label: 'Ledger', icon: 'account_balance_wallet' },
 ]
 
 const PRESENTATION_KEY = 'tw_presentation'
@@ -88,7 +88,7 @@ export default function Layout() {
               end={item.end}
               className={({ isActive }) => `nav-link${isActive ? ' active' : ''}`}
             >
-              <span className="icon">{item.icon}</span>
+              <span className="material-symbols-outlined">{item.icon}</span>
               {item.label}
             </NavLink>
           ))}
@@ -102,7 +102,7 @@ export default function Layout() {
             <div className="r">{user.role}</div>
           </div>
           <button className="logout-btn" onClick={logout} title="Sign out">
-            ⏻
+            <span className="material-symbols-outlined">logout</span>
           </button>
         </div>
       </aside>
