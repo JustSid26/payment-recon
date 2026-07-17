@@ -67,6 +67,7 @@ export interface Merchant {
   name: string
   member_id: string
   status: string
+  email?: string | null
   balances: MerchantBalance[]
   txn_count: number
   quarantined_count?: number
@@ -348,6 +349,8 @@ export interface MerchantLedgerEntry extends AccountEntry {
   account_id: number
 }
 
+export type LedgerPayStatus = 'paid' | 'unpaid' | 'na'
+
 export interface MerchantLedgerStatementRow {
   row_id: string
   processed_date: string
@@ -356,8 +359,8 @@ export interface MerchantLedgerStatementRow {
   payable_minor: number
   reserve_minor: number
   paid_minor: number
-  balance_minor: number
   event_count: number
+  pay_status: LedgerPayStatus
   confirmation: string
   confirmed: boolean
 }

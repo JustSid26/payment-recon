@@ -5,7 +5,7 @@ import json
 import time
 import urllib.request
 
-from fastapi import Depends, FastAPI, HTTPException, Query
+from fastapi import BackgroundTasks, Depends, FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
@@ -16,6 +16,8 @@ from .money import fmt
 from . import settle as settle_mod
 from . import cycle as cycle_mod
 from . import onboarding as onboarding_mod
+from . import mailer as mailer_mod
+from . import settlement_email as settlement_email_mod
 
 app = FastAPI(title="Transactworld Ledger API")
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"],
@@ -286,6 +288,7 @@ def _merchant_item(cur, m) -> dict:
         n_quarantined += int(r["q"])
     return {"merchant_uuid": str(m["merchant_uuid"]), "name": m["name"],
             "member_id": m["member_id"], "status": m["status"],
+            "email": m.get("email"),
             "balances": sorted(bal.values(), key=lambda b: b["currency"]),
             "txn_count": n_total, "quarantined_count": n_quarantined,
             "captured_minor_total": caps}
@@ -303,26 +306,38 @@ def merchants(user: dict = Depends(current_user)):
 
 
 class MerchantRenameBody(BaseModel):
-    name: str
+    name: str | None = None
+    email: str | None = None  # "" clears it; omit to leave unchanged
 
 
 @app.patch("/api/merchants/{muuid}")
 def rename_merchant(muuid: str, body: MerchantRenameBody, user: dict = Depends(require_admin)):
-    """Rename a merchant (display name only; member_id and ledger are untouched)."""
-    name = (body.name or "").strip()
-    if not name:
-        err(400, "invalid_name", "name cannot be empty")
-    if len(name) > 200:
-        err(400, "invalid_name", "name is too long")
+    """Update a merchant's display name and/or payout-confirmation email.
+    member_id and the ledger are untouched."""
+    sets, params = [], []
+    if body.name is not None:
+        name = body.name.strip()
+        if not name:
+            err(400, "invalid_name", "name cannot be empty")
+        if len(name) > 200:
+            err(400, "invalid_name", "name is too long")
+        sets.append("name=%s"); params.append(name)
+    if body.email is not None:
+        email = body.email.strip()
+        if email and ("@" not in email or len(email) > 320):
+            err(400, "invalid_email", "not a valid email address")
+        sets.append("email=%s"); params.append(email or None)
+    if not sets:
+        err(400, "no_changes", "nothing to update")
     with get_pool().connection() as conn:
         cur = conn.cursor()
-        cur.execute("UPDATE merchants SET name=%s WHERE merchant_uuid=%s RETURNING name",
-                    (name, muuid))
+        cur.execute(f"UPDATE merchants SET {', '.join(sets)} WHERE merchant_uuid=%s "
+                    "RETURNING name, email", (*params, muuid))
         row = cur.fetchone()
         if row is None:
             err(404, "not_found", "merchant not found")
         conn.commit()
-        return {"ok": True, "merchant_uuid": muuid, "name": row["name"]}
+        return {"ok": True, "merchant_uuid": muuid, "name": row["name"], "email": row["email"]}
 
 
 @app.get("/api/merchants/unconfigured")
@@ -836,8 +851,18 @@ def generate_settlement(body: GenerateBody, user: dict = Depends(require_admin))
         return settlement_detail(suuid, user)
 
 
+def _email_settlement_bg(settlement_id: int) -> None:
+    """Send a payout-confirmation email on its own connection (background task)."""
+    try:
+        with get_pool().connection() as conn:
+            settlement_email_mod.send_confirmation(conn, settlement_id)
+    except Exception:  # pragma: no cover - never let a mail issue surface
+        pass
+
+
 @app.post("/api/settlements/{suuid}/complete")
-def complete_settlement(suuid: str, user: dict = Depends(require_admin)):
+def complete_settlement(suuid: str, background: BackgroundTasks,
+                        user: dict = Depends(require_admin)):
     with get_pool().connection() as conn:
         cur = conn.cursor()
         cur.execute("SELECT id FROM settlements WHERE settlement_uuid=%s", (suuid,))
@@ -849,7 +874,28 @@ def complete_settlement(suuid: str, user: dict = Depends(require_admin)):
         except settle_mod.SettlementError as e:
             err(409, e.code, e.message)
         conn.commit()
+        # fire-and-forget payout confirmation to the merchant (dormant if no creds)
+        background.add_task(_email_settlement_bg, s["id"])
         return settlement_detail(suuid, user)
+
+
+@app.post("/api/settlements/{suuid}/send-confirmation")
+def send_settlement_confirmation(suuid: str, user: dict = Depends(require_admin)):
+    """Manually (re)send the payout-confirmation email — synchronous, returns the
+    send result so the caller sees success/failure."""
+    with get_pool().connection() as conn:
+        cur = conn.cursor()
+        cur.execute("SELECT id, state FROM settlements WHERE settlement_uuid=%s", (suuid,))
+        s = cur.fetchone()
+        if s is None:
+            err(404, "not_found", "settlement not found")
+        return settlement_email_mod.send_confirmation(conn, s["id"])
+
+
+@app.get("/api/email/status")
+def email_status(user: dict = Depends(require_admin)):
+    """Whether the Gmail mailer is configured (for a settings/health view)."""
+    return mailer_mod.status()
 
 
 class CycleBody(BaseModel):
@@ -1146,16 +1192,21 @@ def merchant_ledger_entries(muuid: str, user: dict = Depends(current_user),
 @app.get("/api/ledger/merchants/{muuid}/statement")
 def merchant_ledger_statement(muuid: str, user: dict = Depends(current_user),
                               page: int = 1, page_size: int = Query(50, le=5000),
-                              q: str | None = None,
+                              q: str | None = None, status: str | None = None,
                               date_from: str | None = None, date_to: str | None = None):
-    """Merchant-facing daily ledger statement, one row per processed date/currency."""
+    """Merchant-facing daily ledger statement, one row per processed date/currency.
+
+    `pay_status` per row reflects whether that day's captured transactions have been
+    paid out to the merchant ('paid' = all settled+completed, 'unpaid' = still owed,
+    'na' = no captures that day, e.g. a pure payout/reserve row). `status=paid|unpaid`
+    filters to those rows."""
     with get_pool().connection() as conn:
         cur = conn.cursor()
         cur.execute("SELECT id FROM merchants WHERE merchant_uuid=%s", (muuid,))
         m = cur.fetchone()
         if m is None or (user["role"] == "merchant" and m["id"] != user["merchant_id"]):
             err(404, "not_found", "merchant not found")
-        where, p = ["e.merchant_id=%(mid)s"], {"mid": m["id"]}
+        where, p = ["e.merchant_id=%(mid)s"], {"mid": m["id"], "ctypes": list(settle_mod.CANDIDATE_TYPES)}
         filters = []
         if date_from:
             filters.append("processed_date >= %(df)s::date"); p["df"] = date_from
@@ -1164,6 +1215,9 @@ def merchant_ledger_statement(muuid: str, user: dict = Depends(current_user),
         if q and q.strip():
             p["q"] = f"%{q.strip().replace(' ', '%')}%"
             filters.append("(currency ILIKE %(q)s OR latest_event_uuid ILIKE %(q)s OR processed_date::text ILIKE %(q)s)")
+        status = (status or "").strip().lower()
+        if status in ("paid", "unpaid"):
+            filters.append("pay_status = %(pstatus)s"); p["pstatus"] = status
         filtered = " AND ".join(filters) if filters else "TRUE"
         w = " AND ".join(where)
         cte = f"""
@@ -1184,9 +1238,6 @@ def merchant_ledger_statement(muuid: str, user: dict = Depends(current_user),
                          WHEN a.account_type='settlement_payable'
                           AND e.event_type='settlement_completed'
                           AND le.direction='debit' THEN le.amount_minor ELSE 0 END),0)::bigint AS paid_minor,
-                       COALESCE(SUM(CASE WHEN a.account_type IN ('merchant_payable','merchant_reserve','settlement_payable')
-                         THEN CASE WHEN le.direction='credit' THEN le.amount_minor ELSE -le.amount_minor END
-                         ELSE 0 END),0)::bigint AS balance_delta_minor,
                        COUNT(DISTINCT e.id)::int AS event_count,
                        (ARRAY_AGG(e.event_uuid::text ORDER BY e.occurred_at DESC, e.id DESC))[1] AS latest_event_uuid
                   FROM ledger_events e
@@ -1194,15 +1245,27 @@ def merchant_ledger_statement(muuid: str, user: dict = Depends(current_user),
                   JOIN accounts a ON a.id=le.account_id
                  WHERE {w}
                  GROUP BY e.occurred_at::date, e.currency
-            ), running AS (
-                SELECT *,
-                       SUM(balance_delta_minor) OVER (
-                         PARTITION BY currency ORDER BY processed_date
-                         ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW
-                       )::bigint AS balance_minor
-                  FROM daily
+            ), settle_status AS (
+                SELECT e.occurred_at::date AS processed_date, e.currency,
+                       COUNT(*) AS cap_n,
+                       COUNT(*) FILTER (WHERE s.state='completed') AS n_completed
+                  FROM ledger_events e
+                  LEFT JOIN settlement_items si ON si.event_id=e.id
+                  LEFT JOIN settlements s ON s.id=si.settlement_id
+                 WHERE {w} AND e.event_type = ANY(%(ctypes)s) AND e.source_txn_id IS NOT NULL
+                 GROUP BY 1, 2
+            ), joined AS (
+                SELECT d.*,
+                       CASE
+                         WHEN COALESCE(ss.cap_n, 0) = 0 THEN 'na'
+                         WHEN ss.n_completed = ss.cap_n THEN 'paid'
+                         ELSE 'unpaid'
+                       END AS pay_status
+                  FROM daily d
+                  LEFT JOIN settle_status ss
+                    ON ss.processed_date = d.processed_date AND ss.currency = d.currency
             ), filtered AS (
-                SELECT * FROM running WHERE {filtered}
+                SELECT * FROM joined WHERE {filtered}
             )
         """
         cur.execute(cte + "SELECT COUNT(*) AS n FROM filtered", p)
@@ -1224,8 +1287,8 @@ def merchant_ledger_statement(muuid: str, user: dict = Depends(current_user),
                 "payable_minor": int(r["payable_minor"] or 0),
                 "reserve_minor": int(r["reserve_minor"] or 0),
                 "paid_minor": int(r["paid_minor"] or 0),
-                "balance_minor": int(r["balance_minor"] or 0),
                 "event_count": int(r["event_count"] or 0),
+                "pay_status": r["pay_status"],
                 "confirmation": confirm[:12],
                 "confirmed": bool(confirm),
             })

@@ -61,6 +61,24 @@ export default function MerchantDetailPage() {
     }
   }
 
+  // payout-confirmation email
+  const [editingEmail, setEditingEmail] = useState(false)
+  const [emailVal, setEmailVal] = useState('')
+  const [savingEmail, setSavingEmail] = useState(false)
+  const saveEmail = async () => {
+    setSavingEmail(true)
+    try {
+      await api(`/api/merchants/${uuid}`, { method: 'PATCH', body: { email: emailVal.trim() } })
+      toastSuccess(emailVal.trim() ? 'Payout email saved' : 'Payout email cleared')
+      setEditingEmail(false)
+      reloadMerchant()
+    } catch (e) {
+      toastError(e instanceof ApiError ? e.message : 'Could not save email')
+    } finally {
+      setSavingEmail(false)
+    }
+  }
+
   const currencies = useMemo(() => merchant?.balances.map((b) => b.currency) ?? [], [merchant])
   const [reserveCcy, setReserveCcy] = useState<string | null>(null)
   const activeCcy = reserveCcy ?? currencies[0] ?? null
@@ -215,6 +233,39 @@ export default function MerchantDetailPage() {
             <div className="sub">
               <span className="internal-only">Member ID <span className="mono">{merchant.member_id}</span> · </span>
               <StatusChip status={merchant.status} /> · {fmtInt(merchant.txn_count)} transactions
+            </div>
+            <div className="sub" style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 4 }}>
+              {editingEmail ? (
+                <>
+                  <span className="dim small">Payout email</span>
+                  <input
+                    className="input sm"
+                    style={{ maxWidth: 260 }}
+                    type="email"
+                    placeholder="merchant@example.com"
+                    value={emailVal}
+                    autoFocus
+                    onChange={(e) => setEmailVal(e.target.value)}
+                    onKeyDown={(e) => e.key === 'Enter' && void saveEmail()}
+                  />
+                  <button className="btn primary sm" onClick={() => void saveEmail()} disabled={savingEmail}>
+                    {savingEmail ? 'Saving…' : 'Save'}
+                  </button>
+                  <button className="btn sm" onClick={() => setEditingEmail(false)} disabled={savingEmail}>Cancel</button>
+                </>
+              ) : (
+                <>
+                  <span className="dim small">Payout email:</span>
+                  {merchant.email
+                    ? <span className="mono small">{merchant.email}</span>
+                    : <span className="dim small">not set — payout confirmations won’t be emailed</span>}
+                  {isAdmin && (
+                    <button className="linkish" onClick={() => { setEmailVal(merchant.email ?? ''); setEditingEmail(true) }}>
+                      {merchant.email ? 'Edit' : 'Set email'}
+                    </button>
+                  )}
+                </>
+              )}
             </div>
           </div>
           <div className="head-actions">

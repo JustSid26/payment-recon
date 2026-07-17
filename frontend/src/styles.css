@@ -418,6 +418,14 @@ table.data tbody tr.click:hover { background: #f8faff; }
 .ledger-pill a { color: inherit; opacity: 0.7; font-weight: 600; }
 .ledger-pill a:hover { opacity: 1; }
 
+.pay-pill {
+  display: inline-flex; align-items: center;
+  font-size: 12px; font-weight: 600; white-space: nowrap;
+  padding: 3px 10px; border-radius: 999px; border: 1px solid;
+}
+.pay-pill.paid { background: var(--green-bg); border-color: var(--green-border); color: var(--green); }
+.pay-pill.unpaid { background: var(--amber-bg, #fff7ed); border-color: var(--amber-border, #fed7aa); color: var(--amber, #b45309); }
+
 /* compact date input for statement filters */
 .input.sm { padding: 5px 9px; font-size: 12.5px; max-width: 160px; }
 .select.sm { padding: 5px 9px; font-size: 12.5px; max-width: 120px; }

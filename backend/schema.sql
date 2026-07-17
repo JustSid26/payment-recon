@@ -204,6 +204,9 @@ ALTER TABLE settlements
 CREATE INDEX IF NOT EXISTS ix_events_settle_after
   ON ledger_events (merchant_id, currency, settle_after);
 
+-- Merchant contact email — recipient for automated payout-confirmation emails.
+ALTER TABLE merchants ADD COLUMN IF NOT EXISTS email TEXT;
+
 -- Quarantine: unknown merchants (no configured fee schedule) have their
 -- transactions imported but NO ledger events posted until a schedule is assigned.
 -- ledger_posted=false marks such quarantined rows; merchants.status='unconfigured'

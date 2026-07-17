@@ -221,12 +221,27 @@ export default function SettlementDetailPage() {
     setCompleting(true)
     try {
       await api(`/api/settlements/${uuid}/complete`, { method: 'POST' })
-      toastSuccess('Settlement marked as completed — payout posted')
+      toastSuccess('Settlement marked as completed — payout posted, confirmation emailed')
       reload()
     } catch (e) {
       toastError(e instanceof ApiError ? e.message : 'Failed to complete settlement')
     } finally {
       setCompleting(false)
+    }
+  }
+
+  const [emailing, setEmailing] = useState(false)
+  const sendConfirmation = async () => {
+    setEmailing(true)
+    try {
+      const res = await api<{ sent: boolean; reason?: string; to?: string }>(
+        `/api/settlements/${uuid}/send-confirmation`, { method: 'POST' })
+      if (res.sent) toastSuccess(`Payout confirmation sent${res.to ? ` to ${res.to}` : ''}`)
+      else toastError(`Not sent — ${res.reason ?? 'unknown reason'}`)
+    } catch (e) {
+      toastError(e instanceof ApiError ? e.message : 'Failed to send confirmation')
+    } finally {
+      setEmailing(false)
     }
   }
 
@@ -414,9 +429,15 @@ export default function SettlementDetailPage() {
                   {completing ? 'Posting payout…' : '✓ Mark completed'}
                 </button>
               ) : (
-                <button className="btn success" disabled>
-                  ✓ Completed
-                </button>
+                <>
+                  <button className="btn success" disabled>
+                    ✓ Completed
+                  </button>
+                  <button className="btn" onClick={() => void sendConfirmation()} disabled={emailing}
+                          title="Email the payout confirmation (report + transaction list) to the merchant">
+                    {emailing ? 'Sending…' : '✉ Email confirmation'}
+                  </button>
+                </>
               )}
             </div>
           )}

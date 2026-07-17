@@ -4,6 +4,7 @@ import { api, ApiError, getUser } from '../lib/api'
 import { useApi } from '../lib/useApi'
 import type {
   LedgerMerchantDetail,
+  LedgerPayStatus,
   MerchantLedgerStatementRow,
   Paginated,
 } from '../lib/types'
@@ -35,12 +36,15 @@ function CurrencyCell({ currency }: { currency: string }) {
   )
 }
 
-function BalanceCell({ row }: { row: MerchantLedgerStatementRow }) {
-  return (
-    <div className="balance-cell">
-      <b><MoneyCell minor={row.balance_minor} currency={row.currency} /></b>
-    </div>
-  )
+const PAY_STATUS_LABEL: Record<LedgerPayStatus, string> = {
+  paid: 'Paid',
+  unpaid: 'Unpaid',
+  na: '—',
+}
+
+function PayStatusPill({ status }: { status: LedgerPayStatus }) {
+  if (status === 'na') return <span className="dim small">—</span>
+  return <span className={`pay-pill ${status}`}>{PAY_STATUS_LABEL[status]}</span>
 }
 
 function rowPeriod(row: LedgerDisplayRow): string {
@@ -68,6 +72,11 @@ function aggregateRows(items: MerchantLedgerStatementRow[], dateFrom: string, da
     .map(([currency, currencyRows]) => {
       const sortedDesc = [...currencyRows].sort((a, b) => b.processed_date.localeCompare(a.processed_date))
       const latest = sortedDesc[0]
+      const capRows = currencyRows.filter((row) => row.pay_status !== 'na')
+      const wholeStatus: LedgerPayStatus =
+        capRows.length === 0 ? 'na'
+          : capRows.some((row) => row.pay_status === 'unpaid') ? 'unpaid'
+          : 'paid'
       return {
         row_id: `whole:${currency}`,
         processed_date: latest?.processed_date ?? '',
@@ -77,8 +86,8 @@ function aggregateRows(items: MerchantLedgerStatementRow[], dateFrom: string, da
         payable_minor: currencyRows.reduce((sum, row) => sum + row.payable_minor, 0),
         reserve_minor: currencyRows.reduce((sum, row) => sum + row.reserve_minor, 0),
         paid_minor: currencyRows.reduce((sum, row) => sum + row.paid_minor, 0),
-        balance_minor: latest?.balance_minor ?? 0,
         event_count: currencyRows.reduce((sum, row) => sum + row.event_count, 0),
+        pay_status: wholeStatus,
         confirmation: latest?.confirmation ?? '',
         confirmation_label: `${fmtInt(currencyRows.length)} day${currencyRows.length === 1 ? '' : 's'} · ${fmtInt(currencyRows.reduce((sum, row) => sum + row.event_count, 0))} events`,
         confirmed: currencyRows.some((row) => row.confirmed),
@@ -118,6 +127,7 @@ export default function LedgerMerchant() {
   const dateFrom = params.get('date_from') ?? ''
   const dateTo = params.get('date_to') ?? ''
   const query = params.get('q') ?? ''
+  const payStatus = (params.get('status') ?? '') as '' | LedgerPayStatus
   const page = Math.max(1, Number(params.get('page') ?? '1') || 1)
   const [view, setView] = useState<LedgerView>('daily')
 
@@ -136,16 +146,16 @@ export default function LedgerMerchant() {
   const statement = useApi(
     () =>
       api<Paginated<MerchantLedgerStatementRow>>(`/api/ledger/merchants/${uuid}/statement`, {
-        params: { q: query, date_from: dateFrom, date_to: dateTo, page, page_size: PAGE_SIZE },
+        params: { q: query, status: payStatus, date_from: dateFrom, date_to: dateTo, page, page_size: PAGE_SIZE },
       }),
-    [uuid, query, dateFrom, dateTo, page],
+    [uuid, query, payStatus, dateFrom, dateTo, page],
   )
   const fullStatement = useApi(
     () =>
       api<Paginated<MerchantLedgerStatementRow>>(`/api/ledger/merchants/${uuid}/statement`, {
-        params: { q: query, date_from: dateFrom, date_to: dateTo, page: 1, page_size: EXPORT_LIMIT },
+        params: { q: query, status: payStatus, date_from: dateFrom, date_to: dateTo, page: 1, page_size: EXPORT_LIMIT },
       }),
-    [uuid, query, dateFrom, dateTo],
+    [uuid, query, payStatus, dateFrom, dateTo],
   )
 
   const dailyRows: LedgerDisplayRow[] = statement.data?.items ?? []
@@ -199,7 +209,7 @@ export default function LedgerMerchant() {
       'Payable',
       'Rolling reserve',
       'Paid',
-      'Balance',
+      'Status',
       'Movement',
       'Events',
     ],
@@ -210,7 +220,7 @@ export default function LedgerMerchant() {
         toMajor(r.payable_minor, r.currency),
         toMajor(r.reserve_minor, r.currency),
         toMajor(r.paid_minor, r.currency),
-        toMajor(r.balance_minor, r.currency),
+        r.pay_status === 'na' ? '' : PAY_STATUS_LABEL[r.pay_status],
         movementLabel(r),
         r.event_count,
       ]),
@@ -218,7 +228,7 @@ export default function LedgerMerchant() {
 
   const loadExportRows = async () => {
     const res = await api<Paginated<MerchantLedgerStatementRow>>(`/api/ledger/merchants/${uuid}/statement`, {
-      params: { q: query, date_from: dateFrom, date_to: dateTo, page: 1, page_size: EXPORT_LIMIT },
+      params: { q: query, status: payStatus, date_from: dateFrom, date_to: dateTo, page: 1, page_size: EXPORT_LIMIT },
     })
     return view === 'whole' ? aggregateRows(res.items, dateFrom, dateTo) : res.items
   }
@@ -232,7 +242,7 @@ export default function LedgerMerchant() {
     { key: 'rr', header: 'RR', align: 'right', render: (r) => <MoneyCell minor={r.reserve_minor} currency={r.currency} dimZero /> },
     { key: 'paid', header: 'Paid', align: 'right', render: (r) => <MoneyCell minor={r.paid_minor} currency={r.currency} dimZero /> },
     { key: 'currency', header: 'Currency', render: (r) => <CurrencyCell currency={r.currency} /> },
-    { key: 'balance', header: 'Balance', align: 'right', render: (r) => <BalanceCell row={r} /> },
+    { key: 'status', header: 'Status', render: (r) => <PayStatusPill status={r.pay_status} /> },
     {
       key: 'movement',
       header: 'Movement',
@@ -306,7 +316,11 @@ export default function LedgerMerchant() {
             <LedgerMetric label="Payable movement" value={fmtMoney(selected.payable_minor, selected.currency)} tone={moneyTone(selected.payable_minor)} />
             <LedgerMetric label="Rolling reserve" value={fmtMoney(selected.reserve_minor, selected.currency)} tone={moneyTone(selected.reserve_minor)} />
             <LedgerMetric label="Paid" value={fmtMoney(selected.paid_minor, selected.currency)} tone={selected.paid_minor > 0 ? 'positive' : 'neutral'} />
-            <LedgerMetric label="Balance" value={fmtMoney(selected.balance_minor, selected.currency)} />
+            <LedgerMetric
+              label="Payout status"
+              value={selected.pay_status === 'na' ? '—' : PAY_STATUS_LABEL[selected.pay_status]}
+              tone={selected.pay_status === 'paid' ? 'positive' : selected.pay_status === 'unpaid' ? 'negative' : 'neutral'}
+            />
           </div>
         </div>
       )}
@@ -332,13 +346,18 @@ export default function LedgerMerchant() {
             onChange={(e) => setSearch(e.target.value)}
             data-print="hide"
           />
+          <div className="seg" data-print="hide">
+            <button className={payStatus === '' ? 'on' : ''} onClick={() => setParam('status', '')}>All</button>
+            <button className={payStatus === 'paid' ? 'on' : ''} onClick={() => setParam('status', 'paid')}>Paid</button>
+            <button className={payStatus === 'unpaid' ? 'on' : ''} onClick={() => setParam('status', 'unpaid')}>Unpaid</button>
+          </div>
           <div className="ledger-actions" data-print="hide">
             <span className="dim small">From</span>
             <input className="input sm" type="date" value={dateFrom} onChange={(e) => setParam('date_from', e.target.value)} />
             <span className="dim small">to</span>
             <input className="input sm" type="date" value={dateTo} onChange={(e) => setParam('date_to', e.target.value)} />
-            {(dateFrom || dateTo || query) && (
-              <button className="btn sm" onClick={() => { setParam('date_from', ''); setParam('date_to', ''); setSearch('') }}>Clear</button>
+            {(dateFrom || dateTo || query || payStatus) && (
+              <button className="btn sm" onClick={() => { setParam('date_from', ''); setParam('date_to', ''); setParam('status', ''); setSearch('') }}>Clear</button>
             )}
             <span className="export-label">Export</span>
             <button className="export-btn" onClick={() => void exportCSV()} disabled={!rows.length}>CSV</button>
