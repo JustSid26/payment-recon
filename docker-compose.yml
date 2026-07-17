@@ -27,6 +27,13 @@ services:
     environment:
       TW_DSN: postgresql://tw:${DB_PASSWORD}@db:5432/twledger
       TW_JWT_SECRET: ${TW_JWT_SECRET}
+      # Gmail API mailer — empty by default (mailer stays dormant). Fill these in
+      # the VPS .env and `docker compose up -d backend` to enable payout emails.
+      TW_GMAIL_CLIENT_ID: ${TW_GMAIL_CLIENT_ID:-}
+      TW_GMAIL_CLIENT_SECRET: ${TW_GMAIL_CLIENT_SECRET:-}
+      TW_GMAIL_REFRESH_TOKEN: ${TW_GMAIL_REFRESH_TOKEN:-}
+      TW_MAIL_FROM: ${TW_MAIL_FROM:-}
+      TW_MAIL_ENABLED: ${TW_MAIL_ENABLED:-}
     depends_on:
       db:
         condition: service_healthy
