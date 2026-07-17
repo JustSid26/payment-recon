@@ -188,6 +188,34 @@ export default function Upload() {
                 ))}
               </div>
 
+              {/* Quarantine notice — imported but not booked (unknown merchants) */}
+              {result.stats.quarantined > 0 && (
+                <div className="callout amber" onClick={() => navigate('/merchants')} style={{ cursor: 'pointer' }}>
+                  <span>
+                    <b>{fmtInt(result.stats.quarantined)}</b> transactions on hold from{' '}
+                    <b>{fmtInt(result.stats.quarantined_merchants)}</b> unknown merchant
+                    {result.stats.quarantined_merchants === 1 ? '' : 's'} — no ledger events until you assign fee schedules.
+                  </span>
+                  <span className="go">Set up →</span>
+                </div>
+              )}
+
+              {/* Outcome summary — always visible */}
+              <div className="outcome-summary">
+                <div className="outcome ok">
+                  <div className="ov num">{fmtInt(result.stats.captures)}</div>
+                  <div className="ol">Approved / Captured</div>
+                </div>
+                <div className="outcome bad">
+                  <div className="ov num">{fmtInt(result.stats.declines)}</div>
+                  <div className="ol">Declined</div>
+                </div>
+                <div className="outcome">
+                  <div className="ov num">{fmtInt(result.stats.refunds)}</div>
+                  <div className="ol">Refunds</div>
+                </div>
+              </div>
+
               {/* Import totals */}
               <div className="totals-grid internal-only">
                 {([

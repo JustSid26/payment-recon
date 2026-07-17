@@ -9,6 +9,7 @@ const CHIP_COLORS: Record<string, string> = {
   active: 'green',
   paid: 'green',
   ok: 'green',
+  confirmed: 'green',
   auth_failed: 'red',
   failed: 'red',
   voided: 'red',
@@ -189,11 +190,15 @@ export function Modal({
   onClose,
   children,
   footer,
+  size = 'default',
+  headerActions,
 }: {
   title: string
   onClose: () => void
   children: ReactNode
   footer?: ReactNode
+  size?: 'default' | 'wide'
+  headerActions?: ReactNode
 }) {
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -205,12 +210,15 @@ export function Modal({
 
   return (
     <div className="modal-overlay" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
-      <div className="modal">
+      <div className={`modal${size === 'wide' ? ' wide' : ''}`}>
         <div className="modal-head">
           <h2>{title}</h2>
-          <button className="modal-close" onClick={onClose} aria-label="Close">
-            ✕
-          </button>
+          <div className="modal-head-actions">
+            {headerActions}
+            <button className="modal-close" onClick={onClose} aria-label="Close">
+              ✕
+            </button>
+          </div>
         </div>
         <div className="modal-body">{children}</div>
         {footer && <div className="modal-foot">{footer}</div>}

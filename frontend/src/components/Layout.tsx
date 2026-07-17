@@ -10,6 +10,7 @@ const ADMIN_NAV = [
   { to: '/merchants', label: 'Merchants', icon: 'storefront' },
   { to: '/transactions', label: 'Transactions', icon: 'receipt_long' },
   { to: '/settlements', label: 'Settlements', icon: 'payments' },
+  { to: '/rolling-reserve', label: 'Rolling reserve', icon: 'savings' },
   { to: '/ledger', label: 'Ledger', icon: 'account_balance_wallet' },
   { to: '/integrity', label: 'Integrity', icon: 'verified_user' },
 ]

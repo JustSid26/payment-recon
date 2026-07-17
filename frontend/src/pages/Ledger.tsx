@@ -1,77 +1,105 @@
+import { Fragment, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { api, getUser } from '../lib/api'
+import { api } from '../lib/api'
 import { useApi } from '../lib/useApi'
-import type { LedgerAccount } from '../lib/types'
-import { fmtInt } from '../lib/money'
-import { DataTable, EmptyState, MoneyCell, type Column } from '../components/ui'
+import type { CcyAmount, LedgerMerchantRow, LedgerMerchantsResp } from '../lib/types'
+import { fmtInt, fmtMoney } from '../lib/money'
+import { DataTable, EmptyState, type Column } from '../components/ui'
+
+/** Right-aligned per-currency amount stack (one merchant may span currencies). */
+function CcyStack({ rows }: { rows: CcyAmount[] }) {
+  if (!rows || rows.length === 0) return <span className="dim">—</span>
+  const sorted = [...rows].sort((a, b) => a.currency.localeCompare(b.currency))
+  return (
+    <div className="ccy-stack">
+      {sorted.map((r) => (
+        <Fragment key={r.currency}>
+          <span className="ccy-tag">{r.currency}</span>
+          <span className={`money${r.minor < 0 ? ' neg' : ''}`}>{fmtMoney(r.minor, r.currency)}</span>
+        </Fragment>
+      ))}
+    </div>
+  )
+}
 
 export default function Ledger() {
-  const isAdmin = getUser()?.role === 'admin'
   const navigate = useNavigate()
-  const { data, loading } = useApi(() => api<{ items: LedgerAccount[] }>('/api/ledger/accounts'), [])
+  const { data, loading } = useApi(() => api<LedgerMerchantsResp>('/api/ledger/merchants'), [])
 
-  const cols: Column<LedgerAccount>[] = [
+  const merchantCols: Column<LedgerMerchantRow>[] = [
+    { key: 'idx', header: '#', render: (_m, i) => <span className="num dim">{i + 1}</span> },
     {
-      key: 'label',
-      header: 'Account',
-      render: (a) => (
+      key: 'name',
+      header: 'Merchant',
+      render: (m) => (
         <div>
-          <b>{a.label}</b>
-          <div className="small dim internal-only">#{String(a.account_id)}</div>
+          <b>{m.name}</b>
+          <div className="small dim mono">ID {m.member_id}</div>
         </div>
       ),
     },
+    { key: 'payable', header: 'Payable', align: 'right', render: (m) => <CcyStack rows={m.payable} /> },
     {
-      key: 'type',
-      header: 'Type',
-      render: (a) => (
-        <span className="chip" style={{ textTransform: 'none' }}>
-          {a.account_type.replace(/_/g, ' ')}
+      key: 'paid',
+      header: 'Paid out',
+      align: 'right',
+      render: (m) => <CcyStack rows={m.paid.map((p) => ({ currency: p.currency, minor: p.amount_minor }))} />,
+    },
+    {
+      key: 'balanced',
+      header: 'Balanced',
+      align: 'right',
+      render: (m) => (
+        <span className={`ledger-pill ${m.balanced ? 'ok' : 'bad'}`} style={{ display: 'inline-flex' }}>
+          {m.balanced ? '✓ Balanced' : '⚠ Off'}
         </span>
       ),
     },
-    ...(isAdmin
-      ? ([
-          {
-            key: 'merchant',
-            header: 'Merchant',
-            render: (a: LedgerAccount) => (a.merchant_name ? <span className="small">{a.merchant_name}</span> : <span className="dim">— platform —</span>),
-          },
-        ] as Column<LedgerAccount>[])
-      : []),
-    { key: 'ccy', header: 'Currency', render: (a) => <span className="ccy-tag">{a.currency}</span> },
-    {
-      key: 'balance',
-      header: 'Balance',
-      align: 'right',
-      render: (a) => (
-        <b>
-          <MoneyCell minor={a.balance_minor} currency={a.currency} />
-        </b>
-      ),
-    },
   ]
+
+  const [q, setQ] = useState('')
+  const allMerchants = data?.merchants ?? []
+  const merchants = useMemo(() => {
+    const needle = q.trim().toLowerCase()
+    if (!needle) return allMerchants
+    return allMerchants.filter(
+      (m) => m.name.toLowerCase().includes(needle) || (m.member_id ?? '').toLowerCase().includes(needle),
+    )
+  }, [allMerchants, q])
 
   return (
     <div className="stack">
       <div className="page-head">
         <div>
-          <h1>Ledger accounts</h1>
+          <h1>Ledger</h1>
           <div className="sub">
-            {data ? `${fmtInt(data.items.length)} accounts · balances derived from double-entry postings` : ' '}
+            {data ? `${fmtInt(merchants.length)} merchant${merchants.length === 1 ? '' : 's'} · balances derived from double-entry postings` : ' '}
           </div>
         </div>
       </div>
-      <div className="card">
-        <DataTable
-          columns={cols}
-          rows={data?.items ?? []}
-          rowKey={(a) => String(a.account_id)}
-          loading={loading}
-          skeletonRows={8}
-          onRowClick={(a) => navigate(`/ledger/accounts/${a.account_id}`)}
-          empty={<EmptyState title="No ledger accounts" />}
-        />
+
+      <div>
+        <div className="section-head">
+          <span className="st">Merchants</span>
+          <input
+            className="input sm"
+            style={{ maxWidth: 240, marginLeft: 'auto' }}
+            placeholder="Search name or ID…"
+            value={q}
+            onChange={(e) => setQ(e.target.value)}
+          />
+        </div>
+        <div className="card">
+          <DataTable
+            columns={merchantCols}
+            rows={merchants}
+            rowKey={(m) => m.merchant_uuid}
+            loading={loading}
+            skeletonRows={6}
+            onRowClick={(m) => navigate(`/ledger/merchants/${m.merchant_uuid}`)}
+            empty={<EmptyState title="No merchant ledgers yet" hint="Merchants appear here once their transactions are posted" />}
+          />
+        </div>
       </div>
     </div>
   )

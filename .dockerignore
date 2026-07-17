@@ -1,0 +1,15 @@
+# keep the build context small and keep raw PII data / local envs out of the image
+**/.venv
+**/node_modules
+**/dist
+**/__pycache__
+**/*.pyc
+.git
+.env
+# raw cardholder data files — never ship into the image (data comes via the DB dump)
+*.csv
+*.xlsx
+*.docx
+files/
+scratchpad/
+stitch_transactworld_minimalist_ledger_dashboard/

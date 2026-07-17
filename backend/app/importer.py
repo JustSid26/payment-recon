@@ -229,6 +229,13 @@ class Importer:
                     continue
                 txn_id = row["id"]
                 self.stats["txns"] += 1
+                # Outcome counts are by STATUS and cover EVERY imported row —
+                # including quarantined ones — so the upload summary matches the
+                # dashboard (which also counts by status, not by what was booked).
+                if status == "captured":
+                    self.stats["captures"] += 1
+                elif status == "auth_failed":
+                    self.stats["declines"] += 1
 
                 if not configured:
                     self.stats["quarantined"] += 1
@@ -272,8 +279,12 @@ class Importer:
             fee_rows.append((pay_id, mid, "mdr", ccy, mdr, txn_id))
             if app_fee:
                 fee_rows.append((pay_id, mid, "approved_txn", ccy, app_fee, txn_id))
-            self.stats["captures"] += 1
+            # (captures/declines are counted by status in _commit_chunk, not here)
 
+            # Rolling reserve is a % of the net-of-fees payable (capture minus MDR
+            # and the approved-txn fee) — this reproduces the client workbook's RR
+            # figure exactly. Since it's a fraction of payable it can never drive
+            # merchant_payable negative on its own.
             hold = bps_of(payable, sched["reserve_hold_bps"])
             if hold > 0:
                 poster.add(
@@ -304,9 +315,6 @@ class Importer:
                 ],
             )
             fee_rows.append((pay_id, mid, "declined_txn", ccy, d, txn_id))
-            self.stats["declines"] += 1
-        elif status == "auth_failed":
-            self.stats["declines"] += 1
 
     def _flush_and_link(self, cur, poster, fee_rows, reserve_rows) -> None:
         """Flush the batch and attach fee + reserve-hold records to the event ids."""
@@ -353,8 +361,17 @@ class Importer:
     def _sheet_rows(self, path: str, sheet: str) -> list[dict]:
         NS = "{http://schemas.openxmlformats.org/spreadsheetml/2006/main}"
         z = zipfile.ZipFile(path)
-        sst = ET.fromstring(z.read("xl/sharedStrings.xml"))
-        strings = ["".join(t.text or "" for t in si.iter(NS + "t")) for si in sst]
+        # A single-sheet workbook has no sheet2.xml — treat a missing sheet as
+        # empty rather than crashing the whole import.
+        if sheet not in z.namelist():
+            return []
+        # sharedStrings.xml is optional — a workbook that uses only inline strings
+        # or plain numbers won't have one (reading it unconditionally crashed the
+        # whole import). Default to an empty table when absent.
+        strings: list[str] = []
+        if "xl/sharedStrings.xml" in z.namelist():
+            sst = ET.fromstring(z.read("xl/sharedStrings.xml"))
+            strings = ["".join(t.text or "" for t in si.iter(NS + "t")) for si in sst]
         root = ET.fromstring(z.read(sheet))
 
         def col(ref: str) -> str:
@@ -365,12 +382,18 @@ class Importer:
         for row in root.findall(f".//{NS}row"):
             vals = {}
             for c in row.findall(f"{NS}c"):
+                t = c.get("t")
+                if t == "inlineStr":                       # value lives in <is><t>
+                    node = c.find(f"{NS}is")
+                    vals[col(c.get("r"))] = (
+                        "".join(x.text or "" for x in node.iter(NS + "t")) if node is not None else "")
+                    continue
                 v = c.find(f"{NS}v")
                 if v is None:
                     continue
                 val = v.text
-                if c.get("t") == "s":
-                    val = strings[int(val)]
+                if t == "s":
+                    val = strings[int(val)] if val is not None and int(val) < len(strings) else ""
                 vals[col(c.get("r"))] = val
             if not header:
                 header = {v: k for k, v in vals.items()}

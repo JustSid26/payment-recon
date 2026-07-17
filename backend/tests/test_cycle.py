@@ -13,6 +13,7 @@ sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1]))
 from app.ledger import Leg, DEBIT, CREDIT, post_event  # noqa: E402
 from app import cycle as cycle_mod  # noqa: E402
 from app.bizcal import next_settlement_datetime  # noqa: E402
+from app.money import bps_of  # noqa: E402
 
 ADMIN_DSN = "postgresql://tw:tw@localhost:5455/twledger"
 DSN = "postgresql://tw:tw@localhost:5455/twledger_cycle_test"
@@ -91,9 +92,12 @@ def test_settles_and_pays_out_after_t1(conn):
     s = _settlements(conn)
     assert len(s) == 1
     row = s[0]
-    # net = (payable - reserve_hold) minus 1% settlement fee
+    # net = (payable - reserve_hold) minus the settlement fee. The fee is charged
+    # on everything EXCEPT the rolling reserve → its base is the payable, not the
+    # post-reserve subtotal.
     subtotal = payable - hold
-    expected_net = subtotal - subtotal // 100
+    fee = bps_of(payable, 100)
+    expected_net = subtotal - fee
     assert row["state"] == "completed"
     assert row["net_payout_minor"] == expected_net
     assert row["payout_reference"] and row["settled_at"] and row["cycle_date"]

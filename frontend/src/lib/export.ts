@@ -87,3 +87,14 @@ export function printToPDF() {
   // The class only affects @media print, so a lingering value is harmless if
   // afterprint never fires — no timed cleanup needed (it could race the dialog).
 }
+
+/** Print-to-PDF scoped to an open Modal (isolates `.modal-overlay` via @media print). */
+export function printModal() {
+  document.body.classList.add('printing-modal')
+  const cleanup = () => {
+    document.body.classList.remove('printing-modal')
+    window.removeEventListener('afterprint', cleanup)
+  }
+  window.addEventListener('afterprint', cleanup)
+  window.print()
+}

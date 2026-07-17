@@ -20,6 +20,10 @@ CANDIDATE_TYPES = (
     "reversal",
 )
 
+# Rolling-reserve movements are excluded from the settlement-fee base (the fee
+# covers everything else that settled, not funds merely parked in reserve).
+RESERVE_EVENT_TYPES = ("reserve_hold", "reserve_release")
+
 
 class SettlementError(Exception):
     def __init__(self, code: str, message: str):
@@ -29,8 +33,21 @@ class SettlementError(Exception):
 
 def generate(conn: psycopg.Connection, *, merchant_id: int, currency: str,
              window_start: datetime, window_end: datetime,
+             cutoff: datetime | None = None, scope_by_occurred: bool = True,
              generated_by: str = "admin") -> dict:
-    """Returns {'settlement_id': ...} or {'skipped': True, 'reason': ...}."""
+    """Returns {'settlement_id': ...} or {'skipped': True, 'reason': ...}.
+
+    Candidate selection:
+      * scope_by_occurred=True (manual/on-demand): settle the transactions whose
+        occurred_at falls in [window_start, window_end] — the *processing* window
+        the user picked (per-day when start==end) — provided they have matured
+        (settle_after <= cutoff, default now). So "9 -> 9" settles July 9's batch
+        once T+N has elapsed, and cleanly reports "not matured yet" before then.
+      * scope_by_occurred=False (cycle): sweep every matured unsettled event
+        (settle_after <= cutoff) regardless of occurred_at — the backlog-draining
+        behaviour the automated cycle relies on.
+    """
+    cutoff = cutoff or datetime.now(timezone.utc)
     with conn.transaction():
         cur = conn.cursor()
         # serialize per merchant+currency
@@ -57,32 +74,64 @@ def generate(conn: psycopg.Connection, *, merchant_id: int, currency: str,
         if acct is None:
             return {"skipped": True, "reason": "no ledger activity for this merchant/currency"}
 
-        # candidates: payable deltas of unsettled events past settle_after
+        # candidates: unsettled, matured (settle_after <= cutoff) payable events,
+        # optionally scoped to the picked processing window (occurred_at).
+        p = {"acct": acct["id"], "mid": merchant_id, "ccy": currency,
+             "types": list(CANDIDATE_TYPES), "cutoff": cutoff,
+             "ws": window_start, "we": window_end}
+        occ = (" AND e.occurred_at >= %(ws)s AND e.occurred_at <= %(we)s"
+               if scope_by_occurred else "")
         cur.execute(
-            """SELECT e.id AS event_id, e.event_type,
+            f"""SELECT e.id AS event_id, e.event_type,
                       SUM(CASE WHEN le.direction='credit' THEN le.amount_minor
                                ELSE -le.amount_minor END) AS delta
                  FROM ledger_events e
-                 JOIN ledger_entries le ON le.event_id = e.id AND le.account_id = %s
+                 JOIN ledger_entries le ON le.event_id = e.id AND le.account_id = %(acct)s
                  LEFT JOIN settlement_items si ON si.event_id = e.id
-                WHERE e.merchant_id = %s AND e.currency = %s
-                  AND e.event_type = ANY(%s)
-                  AND e.settle_after <= %s
-                  AND si.event_id IS NULL
+                WHERE e.merchant_id = %(mid)s AND e.currency = %(ccy)s
+                  AND e.event_type = ANY(%(types)s)
+                  AND e.settle_after <= %(cutoff)s
+                  AND si.event_id IS NULL{occ}
                 GROUP BY e.id, e.event_type
                HAVING SUM(CASE WHEN le.direction='credit' THEN le.amount_minor
                                ELSE -le.amount_minor END) <> 0""",
-            (acct["id"], merchant_id, currency, list(CANDIDATE_TYPES), window_end),
+            p,
         )
         cands = [{**c, "delta": int(c["delta"])} for c in cur.fetchall()]
         if not cands:
-            return {"skipped": True, "reason": "no unsettled events in window"}
+            # Distinguish "nothing here" from "here, but not matured yet".
+            if scope_by_occurred:
+                cur.execute(
+                    """SELECT COUNT(DISTINCT e.id) AS n, MIN(e.settle_after) AS earliest
+                         FROM ledger_events e
+                         JOIN ledger_entries le ON le.event_id = e.id
+                                                AND le.account_id = %(acct)s
+                         LEFT JOIN settlement_items si ON si.event_id = e.id
+                        WHERE e.merchant_id = %(mid)s AND e.currency = %(ccy)s
+                          AND e.event_type = ANY(%(types)s)
+                          AND e.settle_after > %(cutoff)s AND si.event_id IS NULL
+                          AND e.occurred_at >= %(ws)s AND e.occurred_at <= %(we)s""",
+                    p,
+                )
+                imm = cur.fetchone()
+                if imm and imm["n"]:
+                    return {"skipped": True,
+                            "reason": f"{imm['n']} transaction(s) in this window haven't "
+                                      f"matured yet — they become settleable on "
+                                      f"{imm['earliest'].date()} (T+N). Nothing to pay out "
+                                      f"until then."}
+            return {"skipped": True, "reason": "no unsettled transactions in this window"}
 
-        n_window = sum(c["delta"] for c in cands)
+        n_window = sum(c["delta"] for c in cands)      # actual net, incl. reserve moves
+        # The settlement fee is charged on everything EXCEPT the rolling reserve
+        # (holds are just parked funds, not a settled amount to skim). Base = the
+        # net of all candidates minus the reserve_hold/reserve_release deltas.
+        fee_base = sum(c["delta"] for c in cands
+                       if c["event_type"] not in RESERVE_EVENT_TYPES)
         cur.execute("SELECT settlement_fee_bps FROM fee_schedules WHERE merchant_id=%s",
                     (merchant_id,))
         fee_bps = (cur.fetchone() or {"settlement_fee_bps": 100})["settlement_fee_bps"]
-        sf = bps_of(max(n_window, 0), fee_bps)
+        sf = bps_of(max(fee_base, 0), fee_bps)
         net = n_window - sf
         if net <= 0:
             return {"skipped": True,
@@ -161,12 +210,13 @@ def _breakdown(cur, event_ids: list[int], merchant_id: int, currency: str,
     )
     reserve = {r["event_type"]: r["delta"] for r in cur.fetchall()}
     cur.execute(
-        """SELECT COUNT(*) FILTER (WHERE status='auth_failed') AS declined,
-                  COUNT(*) FILTER (WHERE status IN ('captured','refunded',
-                                                    'partially_refunded')) AS paid
-             FROM transactions WHERE merchant_id=%s AND currency=%s
-              AND occurred_at >= %s AND occurred_at < %s""",
-        (merchant_id, currency, window_start, window_end),
+        """SELECT COUNT(DISTINCT source_txn_id)
+                    FILTER (WHERE event_type='decline_fee' AND source_txn_id IS NOT NULL) AS declined,
+                  COUNT(DISTINCT source_txn_id)
+                    FILTER (WHERE event_type='payment_captured' AND source_txn_id IS NOT NULL) AS paid
+             FROM ledger_events
+            WHERE id = ANY(%s)""",
+        (event_ids,),
     )
     counts = cur.fetchone()
     cap = clearing.get("payment_captured", {})
@@ -295,6 +345,84 @@ def line_items(conn: psycopg.Connection, settlement_id: int) -> list[dict]:
         g = groups[key]
         g["occurred_at"] = g["occurred_at"].isoformat()
         out.append(g)
+    return out
+
+
+def day_line_items(conn: psycopg.Connection, merchant_id: int, currency: str,
+                   day: str) -> list[dict]:
+    """Per-transaction charge breakdown for a single processing day.
+
+    Mirrors the shape of `line_items` (so the UI/export can reuse one table) but
+    is sourced from the transactions that occurred on `day` (a YYYY-MM-DD string),
+    regardless of whether they have been settled yet. `net_minor` is the payable
+    effect: gross − per-txn fees − reserve held (+ reserve released).
+    """
+    cur = conn.cursor()
+    cur.execute(
+        """SELECT id, occurred_at, upstream_payment_id, tracking_id, order_id,
+                  payment_brand, payment_mode, last_four, status, captured_minor
+             FROM transactions
+            WHERE merchant_id=%s AND currency=%s AND occurred_at::date=%s
+            ORDER BY occurred_at, id""",
+        (merchant_id, currency, day),
+    )
+    txns = cur.fetchall()
+    if not txns:
+        return []
+    ids = [t["id"] for t in txns]
+
+    cur.execute(
+        """SELECT transaction_id, fee_type, SUM(fee_minor) AS total
+             FROM fees WHERE transaction_id = ANY(%s)
+            GROUP BY transaction_id, fee_type""",
+        (ids,),
+    )
+    fees: dict[int, dict[str, int]] = {}
+    for f in cur.fetchall():
+        fees.setdefault(f["transaction_id"], {})[f["fee_type"]] = int(f["total"])
+
+    # reserve delta (held − released) per originating transaction
+    cur.execute(
+        """SELECT e.source_txn_id AS tid,
+                  SUM(CASE WHEN le.direction='credit' THEN le.amount_minor
+                           ELSE -le.amount_minor END) AS delta
+             FROM ledger_entries le
+             JOIN ledger_events e ON e.id = le.event_id
+             JOIN accounts a ON a.id = le.account_id AND a.account_type='merchant_reserve'
+            WHERE e.source_txn_id = ANY(%s) GROUP BY e.source_txn_id""",
+        (ids,),
+    )
+    reserve = {r["tid"]: int(r["delta"]) for r in cur.fetchall()}
+
+    out = []
+    for t in txns:
+        fmap = fees.get(t["id"], {})
+        mdr = fmap.get("mdr", 0)
+        appr = fmap.get("approved_txn", 0)
+        decl = fmap.get("declined_txn", 0)
+        rff = fmap.get("refund_fee", 0)
+        cbf = fmap.get("chargeback_fee", 0)
+        res = reserve.get(t["id"], 0)              # + when held, − when released
+        gross = int(t["captured_minor"] or 0)
+        net = gross - mdr - appr - decl - rff - cbf - res
+        if t["status"] == "auth_failed":
+            typ = "decline_fee"
+        elif t["status"] in ("refunded", "partially_refunded"):
+            typ = "refund"
+        else:
+            typ = "payment_captured"
+        out.append({
+            "occurred_at": t["occurred_at"].isoformat(),
+            "type": typ,
+            "reference": t["upstream_payment_id"] or t["tracking_id"] or t["order_id"] or "",
+            "brand": t["payment_brand"] or t["payment_mode"] or "",
+            "last_four": t["last_four"] or "",
+            "status": t["status"],
+            "gross_minor": gross, "mdr_minor": mdr,
+            "approved_fee_minor": appr, "declined_fee_minor": decl,
+            "refund_fee_minor": rff, "chargeback_fee_minor": cbf,
+            "reserve_minor": res, "net_minor": net,
+        })
     return out
 
 

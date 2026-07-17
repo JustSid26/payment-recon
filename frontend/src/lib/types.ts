@@ -59,6 +59,7 @@ export interface MerchantBalance {
   payable_minor: number
   reserve_minor: number
   in_settlement_minor: number
+  paid_minor: number
 }
 
 export interface Merchant {
@@ -82,6 +83,7 @@ export interface FeeSchedule {
   reserve_hold_bps: number
   reserve_hold_days: number
   settlement_fee_bps: number
+  settlement_delay_days: number
 }
 
 export interface MerchantDetail extends Merchant {
@@ -230,6 +232,37 @@ export interface SettlementLineItem {
   net_minor: number
 }
 
+export type DailyStatus = 'paid' | 'in_settlement' | 'pending' | 'partial'
+
+export interface DailySettlementRow {
+  date: string
+  approved_count: number
+  declined_count: number
+  volume: number
+  gross_captured_minor: number
+  fees_minor: number
+  reserve_minor: number
+  net_payable_minor: number
+  status: DailyStatus
+  settlement_uuid: string | null
+}
+
+export interface DailySettlementResp {
+  currency: string
+  currencies: string[]
+  days: DailySettlementRow[]
+  totals: {
+    volume: number
+    approved: number
+    declined: number
+    gross_captured_minor: number
+    fees_minor: number
+    net_payable_minor: number
+    paid_net_minor: number
+    remaining_net_minor: number
+  }
+}
+
 export interface SettlementDetail {
   settlement_uuid: string
   merchant_uuid?: string
@@ -240,6 +273,7 @@ export interface SettlementDetail {
   state: string
   counts: { paid: number; declined: number; refunds: number; chargebacks: number }
   breakdown: SettlementBreakdown
+  fee_schedule?: FeeSchedule
   usdc: { rate: string; amount: string }
   items_count: number
 }
@@ -255,6 +289,7 @@ export interface LedgerAccount {
   account_type: string
   merchant_uuid: string | null
   merchant_name: string | null
+  member_id: string | null
   currency: string
   balance_minor: number
   label: string
@@ -263,12 +298,76 @@ export interface LedgerAccount {
 export interface AccountEntry {
   entry_uuid: string
   posted_at: string
+  occurred_at: string
   event_type: string
   event_uuid: string
   direction: 'debit' | 'credit'
   amount_minor: number
   balance_after_minor: number
   currency: string
+}
+
+// ---- Ledger, grouped by merchant ----
+export interface CcyAmount {
+  currency: string
+  minor: number
+}
+export interface LedgerMerchantRow {
+  merchant_uuid: string
+  name: string
+  member_id: string
+  status: string
+  payable: CcyAmount[]
+  reserve: CcyAmount[]
+  paid: { currency: string; amount_minor: number }[]
+  balanced: boolean
+}
+export interface PlatformAccount {
+  account_id: number
+  account_type: string
+  currency: string
+  balance_minor: number
+}
+export interface LedgerMerchantsResp {
+  merchants: LedgerMerchantRow[]
+  platform: PlatformAccount[]
+}
+export interface LedgerMerchantDetail {
+  merchant_uuid: string
+  name: string
+  member_id: string
+  status: string
+  accounts: PlatformAccount[]
+  payable: CcyAmount[]
+  reserve: CcyAmount[]
+  paid: { currency: string; amount_minor: number }[]
+  balanced: boolean
+}
+export interface MerchantLedgerEntry extends AccountEntry {
+  account_type: string
+  account_id: number
+}
+
+export interface MerchantLedgerStatementRow {
+  row_id: string
+  processed_date: string
+  currency: string
+  processed_minor: number
+  payable_minor: number
+  reserve_minor: number
+  paid_minor: number
+  balance_minor: number
+  event_count: number
+  confirmation: string
+  confirmed: boolean
+}
+
+export interface FxRatesResp {
+  base: string
+  source: string
+  as_of: string
+  fallback: boolean
+  rates: Record<string, number>
 }
 
 // ---- Integrity ----
@@ -309,6 +408,8 @@ export interface UploadStats {
   refunds: number
   skipped_dupes: number
   unmatched_refunds: number
+  quarantined: number
+  quarantined_merchants: number
 }
 
 export interface UploadIntegrity {

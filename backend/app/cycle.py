@@ -110,8 +110,10 @@ def run_cycle(conn: psycopg.Connection, *, cutoff: datetime | None = None,
     settled, skipped = [], []
     for mid, ccy in _eligible_pairs(conn, cutoff):
         ws = _window_start(conn, mid, ccy)
+        # the cycle drains ALL matured backlog (not just one processing window)
         res = settle_mod.generate(conn, merchant_id=mid, currency=ccy,
                                   window_start=ws, window_end=cutoff,
+                                  cutoff=cutoff, scope_by_occurred=False,
                                   generated_by=generated_by)
         if res.get("skipped"):
             skipped.append({"merchant_id": mid, "currency": ccy, "reason": res["reason"]})

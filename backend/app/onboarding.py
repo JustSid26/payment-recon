@@ -11,7 +11,7 @@ from __future__ import annotations
 import psycopg
 
 from .importer import Importer, insert_fee_schedule, WORKBOOK_RATES, ANNEX_RATES, FEE_COLUMNS
-from .ledger import BulkPoster
+from .ledger import BulkPoster, AccountCache, Leg, DEBIT, CREDIT, post_event
 
 # Named rate cards the onboarding UI/CLI can pick from, plus fully custom rates.
 PRESETS = {"workbook": WORKBOOK_RATES, "annex": ANNEX_RATES}
@@ -51,12 +51,14 @@ def _validate_rates(r: dict) -> None:
 
 def assign_fee_schedule(conn: psycopg.Connection, merchant_id: int, rates: dict,
                         *, reprocess: bool = True) -> dict:
-    """Set (or replace) a merchant's fee schedule and activate them. By default
-    replays their quarantined transactions into the ledger. Rates changes only
-    affect not-yet-posted transactions — the ledger is append-only."""
-    # Activation AND replay run in ONE transaction: if the replay fails (e.g. a
-    # bad schedule), the status='active' + fee schedule roll back too, so a
-    # merchant is never stranded active-with-no-ledger-events.
+    """Set (or replace) a merchant's fee schedule and activate them.
+
+    If the merchant already has posted (but unsettled) transactions, they are
+    RE-PRICED: the old ledger events are reversed and the transactions replayed
+    under the new schedule, so a rate change (e.g. rolling reserve 5%→20%) is
+    actually reflected. Refuses if any transaction is already settled."""
+    # Activation, re-price and replay run in ONE transaction: if anything fails
+    # (e.g. a bad schedule) it all rolls back, so a merchant is never stranded.
     with conn.transaction():
         cur = conn.cursor()
         cur.execute("SELECT id FROM merchants WHERE id=%s FOR UPDATE", (merchant_id,))
@@ -65,8 +67,54 @@ def assign_fee_schedule(conn: psycopg.Connection, merchant_id: int, rates: dict,
         cur.execute("DELETE FROM fee_schedules WHERE merchant_id=%s", (merchant_id,))
         insert_fee_schedule(cur, merchant_id, rates)
         cur.execute("UPDATE merchants SET status='active' WHERE id=%s", (merchant_id,))
+        repriced = _reverse_posted(conn, cur, merchant_id) if reprocess else 0
         posted = _reprocess_body(conn, cur, merchant_id) if reprocess else 0
-    return {"merchant_id": merchant_id, "transactions_posted": posted}
+    return {"merchant_id": merchant_id, "transactions_posted": posted,
+            "transactions_repriced": repriced}
+
+
+def _reverse_posted(conn: psycopg.Connection, cur, merchant_id: int) -> int:
+    """Reverse a merchant's already-posted transaction events so they can be
+    replayed under a new schedule. Append-only safe (posts reversal events, never
+    deletes). Refuses if any of those events are already in a settlement."""
+    cur.execute("""SELECT COUNT(*) AS n FROM settlement_items si
+                     JOIN ledger_events e ON e.id=si.event_id
+                    WHERE e.merchant_id=%s""", (merchant_id,))
+    if cur.fetchone()["n"] > 0:
+        raise ValueError(
+            "cannot change rates: some of this merchant's transactions are already "
+            "settled. Reset the demo (or re-import) and set the rate before settling.")
+    # posting events (linked to a transaction) not already reversed
+    cur.execute("""SELECT e.id, e.currency, e.occurred_at, e.source_txn_id
+                     FROM ledger_events e
+                    WHERE e.merchant_id=%s AND e.source_txn_id IS NOT NULL
+                      AND e.reverses_event_id IS NULL
+                      AND NOT EXISTS (SELECT 1 FROM ledger_events r
+                                       WHERE r.reverses_event_id=e.id)
+                    ORDER BY e.id""", (merchant_id,))
+    events = cur.fetchall()
+    if not events:
+        return 0
+    accts = AccountCache()
+    for ev in events:
+        cur.execute("""SELECT a.account_type, a.merchant_id, le.direction, le.amount_minor
+                         FROM ledger_entries le JOIN accounts a ON a.id=le.account_id
+                        WHERE le.event_id=%s""", (ev["id"],))
+        legs = [Leg(r["account_type"], r["merchant_id"],
+                    CREDIT if r["direction"] == DEBIT else DEBIT, int(r["amount_minor"]))
+                for r in cur.fetchall()]
+        post_event(conn, event_type="reversal", source_type="reprice_reversal",
+                   source_id=str(ev["id"]), merchant_id=merchant_id, currency=ev["currency"],
+                   occurred_at=ev["occurred_at"], legs=legs, reverses_event_id=ev["id"],
+                   source_txn_id=ev["source_txn_id"], accounts=accts,
+                   metadata={"repriced": True})
+    eids = [e["id"] for e in events]
+    cur.execute("DELETE FROM fees WHERE ledger_event_id = ANY(%s)", (eids,))
+    cur.execute("DELETE FROM reserve_holds WHERE hold_event_id = ANY(%s)", (eids,))
+    cur.execute("DELETE FROM posting_idempotency WHERE event_id = ANY(%s)", (eids,))
+    cur.execute("UPDATE transactions SET ledger_posted=false "
+                "WHERE merchant_id=%s AND ledger_posted=true", (merchant_id,))
+    return len(events)
 
 
 def reprocess_merchant(conn: psycopg.Connection, merchant_id: int) -> int:

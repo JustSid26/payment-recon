@@ -5,6 +5,7 @@ import { useApi } from '../lib/useApi'
 import type { Merchant, Settlement } from '../lib/types'
 import { fmtDate, fmtInt } from '../lib/money'
 import { DataTable, EmptyState, MoneyCell, StatusChip, type Column } from '../components/ui'
+import DailySettlementRecords from '../components/DailySettlementRecords'
 
 const CURRENCIES = ['EUR', 'USD', 'AUD', 'CAD', 'GBP', 'JPY']
 
@@ -13,6 +14,7 @@ export default function Settlements() {
   const isAdmin = user.role === 'admin'
   const navigate = useNavigate()
 
+  const [view, setView] = useState<'list' | 'daily'>('list')
   const [merchantUuid, setMerchantUuid] = useState('')
   const [currency, setCurrency] = useState('')
 
@@ -72,15 +74,45 @@ export default function Settlements() {
     },
   ]
 
+  const dailyUuid = isAdmin ? merchantUuid : user.merchant_uuid ?? ''
+  const dailyName = isAdmin
+    ? (merchants.data?.items ?? []).find((m) => m.merchant_uuid === merchantUuid)?.name ?? 'merchant'
+    : user.merchant_name ?? 'merchant'
+
   return (
     <div className="stack">
       <div className="page-head">
         <div>
           <h1>Settlements</h1>
-          <div className="sub">{data ? `${fmtInt(data.items.length)} settlements` : ' '}</div>
+          <div className="sub">
+            {view === 'daily' ? 'Per-day payable, fees and settled-vs-remaining' : data ? `${fmtInt(data.items.length)} settlements` : ' '}
+          </div>
+        </div>
+        <div className="head-actions">
+          <div className="seg">
+            <button className={view === 'list' ? 'on' : ''} onClick={() => setView('list')}>Settlements</button>
+            <button className={view === 'daily' ? 'on' : ''} onClick={() => setView('daily')}>Daily records</button>
+          </div>
         </div>
       </div>
 
+      {view === 'daily' ? (
+        isAdmin && !merchantUuid ? (
+          <div className="card">
+            <div className="card-pad" style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
+              <span className="dim">Pick a merchant to see daily records:</span>
+              <select className="select" style={{ maxWidth: 240 }} value={merchantUuid} onChange={(e) => setMerchantUuid(e.target.value)}>
+                <option value="">Select merchant…</option>
+                {(merchants.data?.items ?? []).map((m) => (
+                  <option key={m.merchant_uuid} value={m.merchant_uuid}>{m.name}</option>
+                ))}
+              </select>
+            </div>
+          </div>
+        ) : (
+          <DailySettlementRecords key={dailyUuid} merchantUuid={dailyUuid} merchantName={dailyName} />
+        )
+      ) : (
       <div className="card">
         <div className="filter-bar">
           {isAdmin && (
@@ -117,6 +149,7 @@ export default function Settlements() {
           }
         />
       </div>
+      )}
     </div>
   )
 }

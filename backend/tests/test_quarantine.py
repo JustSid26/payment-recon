@@ -90,3 +90,29 @@ def test_onboarding_posts_at_configured_rate(conn):
 def test_onboarding_is_idempotent(conn):
     mid = one(conn, "SELECT id FROM merchants WHERE member_id='99002'")["id"]
     assert ob.reprocess_merchant(conn, mid) == 0  # nothing left quarantined
+
+
+def _reserve(conn, mid):
+    return one(conn, "SELECT COALESCE(b.balance_minor,0) AS v FROM accounts a "
+               "LEFT JOIN account_balances b ON b.account_id=a.id "
+               "WHERE a.merchant_id=%s AND a.account_type='merchant_reserve'", (mid,))["v"]
+
+
+def test_changing_rate_reprices_the_ledger(conn):
+    # 1000.00 capture, onboard at 5% rolling reserve
+    Importer(conn)._commit_chunk([row("rp1", "77001", "Reprice Co")], "t.csv", {})
+    mid = one(conn, "SELECT id FROM merchants WHERE member_id='77001'")["id"]
+    ob.assign_fee_schedule(conn, mid,
+                           ob.resolve_rates(overrides={"mdr_bps": 300, "reserve_hold_bps": 500}))
+    assert _reserve(conn, mid) == 4_850       # 5% of net-of-fees payable (100000 - 3000 MDR)
+
+    # change rolling reserve 5% -> 20%: must RE-PRICE, not stack on the old hold
+    summary = ob.assign_fee_schedule(conn, mid,
+                                     ob.resolve_rates(overrides={"mdr_bps": 300, "reserve_hold_bps": 2000}))
+    assert summary["transactions_repriced"] >= 1
+    assert _reserve(conn, mid) == 19_400      # now 20% of net-of-fees payable, old hold reversed (not stacked)
+    # ledger still balances after the reverse+replay
+    bad = one(conn, """SELECT COUNT(*) AS n FROM (
+        SELECT event_id FROM ledger_entries GROUP BY event_id
+        HAVING SUM(CASE direction WHEN 'debit' THEN amount_minor ELSE -amount_minor END) <> 0) x""")
+    assert bad["n"] == 0

@@ -1,0 +1,562 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Reconciliation, Explained — TransactWorld</title>
+<style>
+  :root{
+    --ink:#0f172a; --ink-2:#475569; --ink-3:#94a3b8;
+    --bg:#f6f8fb; --surface:#ffffff; --border:#e6eaf0; --border-strong:#d3dae4;
+    --brand:#2563eb; --brand-soft:#eef4ff;
+    --green:#059669; --green-soft:#e7f6f0;
+    --amber:#d97706; --amber-soft:#fdf3e5;
+    --red:#dc2626; --purple:#7c3aed; --purple-soft:#f3edfe;
+    --radius:16px; --radius-sm:10px;
+    --shadow:0 1px 2px rgba(16,24,40,.04), 0 10px 30px rgba(16,24,40,.06);
+    --mono:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+  }
+  *{box-sizing:border-box}
+  html{scroll-behavior:smooth}
+  body{
+    margin:0; background:var(--bg); color:var(--ink);
+    font-family:'Inter',system-ui,-apple-system,Segoe UI,Roboto,sans-serif;
+    line-height:1.6; font-size:16px;
+    -webkit-font-smoothing:antialiased;
+  }
+  .wrap{max-width:1060px; margin:0 auto; padding:0 24px}
+
+  /* header */
+  header.hero{
+    background:linear-gradient(160deg,#0f172a 0%,#1e293b 60%,#243247 100%);
+    color:#fff; padding:64px 0 56px;
+  }
+  header.hero .kick{font-size:12.5px; letter-spacing:.16em; text-transform:uppercase; color:#93c5fd; font-weight:700}
+  header.hero h1{font-size:40px; line-height:1.1; margin:14px 0 12px; font-weight:750; letter-spacing:-.02em}
+  header.hero p{font-size:18px; color:#cbd5e1; max-width:720px; margin:0}
+  header.hero .meta{margin-top:22px; font-size:13px; color:#94a3b8}
+
+  /* sticky nav */
+  nav.toc{
+    position:sticky; top:0; z-index:20; background:rgba(255,255,255,.86);
+    backdrop-filter:blur(10px); border-bottom:1px solid var(--border);
+  }
+  nav.toc .wrap{display:flex; gap:4px; overflow-x:auto; padding:10px 24px}
+  nav.toc a{
+    white-space:nowrap; font-size:13px; font-weight:550; color:var(--ink-2);
+    text-decoration:none; padding:7px 12px; border-radius:8px;
+  }
+  nav.toc a:hover{background:var(--brand-soft); color:var(--brand)}
+
+  section{padding:52px 0; border-bottom:1px solid var(--border)}
+  section:last-of-type{border-bottom:none}
+  .num{font:700 13px/1 var(--mono); color:var(--brand); letter-spacing:.05em}
+  h2{font-size:28px; font-weight:720; letter-spacing:-.02em; margin:8px 0 6px}
+  h3{font-size:19px; font-weight:650; margin:30px 0 8px}
+  .lead{font-size:17.5px; color:var(--ink-2); max-width:760px; margin:0 0 8px}
+  p{margin:12px 0}
+  strong{font-weight:650; color:var(--ink)}
+  code{font:600 13.5px var(--mono); background:#eef1f6; color:#334155; padding:1.5px 6px; border-radius:5px}
+
+  .card{background:var(--surface); border:1px solid var(--border); border-radius:var(--radius); box-shadow:var(--shadow); padding:22px 24px}
+  .grid{display:grid; gap:16px}
+  .g2{grid-template-columns:1fr 1fr}
+  .g3{grid-template-columns:repeat(3,1fr)}
+  @media(max-width:820px){.g2,.g3{grid-template-columns:1fr}}
+
+  .callout{border-radius:var(--radius-sm); padding:16px 18px; margin:18px 0; font-size:15px; border:1px solid}
+  .callout .t{font-weight:700; font-size:12.5px; text-transform:uppercase; letter-spacing:.06em; margin-bottom:4px; display:flex; align-items:center; gap:7px}
+  .callout.def{background:var(--brand-soft); border-color:#d5e3ff; color:#1e3a8a}
+  .callout.code-note{background:#f8fafc; border-color:var(--border-strong)}
+  .callout.code-note .t{color:var(--ink-2)}
+  .callout.warn{background:var(--amber-soft); border-color:#f5dcb3; color:#92590a}
+  .callout.key{background:var(--green-soft); border-color:#c4ead9; color:#065f46}
+
+  .tag{display:inline-block; font-size:11.5px; font-weight:700; padding:3px 9px; border-radius:999px; letter-spacing:.03em}
+  .tag.built{background:var(--green-soft); color:var(--green)}
+  .tag.plan{background:var(--amber-soft); color:var(--amber)}
+
+  table{width:100%; border-collapse:collapse; margin:16px 0; font-size:14px; background:var(--surface); border:1px solid var(--border); border-radius:var(--radius-sm); overflow:hidden}
+  th,td{text-align:left; padding:11px 14px; border-bottom:1px solid var(--border); vertical-align:top}
+  th{background:#f8fafc; font-size:11.5px; text-transform:uppercase; letter-spacing:.05em; color:var(--ink-3); font-weight:700}
+  tr:last-child td{border-bottom:none}
+  td code{font-size:12.5px}
+  .mono{font-family:var(--mono)}
+  .r{text-align:right}
+
+  /* money flow */
+  .flow{display:flex; align-items:stretch; gap:0; flex-wrap:wrap; margin:22px 0}
+  .flow .node{flex:1; min-width:130px; background:var(--surface); border:1px solid var(--border-strong); border-radius:12px; padding:14px 12px; text-align:center; position:relative}
+  .flow .node .who{font-weight:700; font-size:14px}
+  .flow .node .role{font-size:11.5px; color:var(--ink-3); margin-top:2px}
+  .flow .arrow{display:flex; flex-direction:column; align-items:center; justify-content:center; padding:0 6px; min-width:64px}
+  .flow .arrow .amt{font:700 12px var(--mono); color:var(--green)}
+  .flow .arrow .fee{font-size:10.5px; color:var(--red)}
+  .flow .arrow .ln{font-size:20px; color:var(--ink-3); line-height:1}
+  @media(max-width:820px){.flow{flex-direction:column}.flow .arrow{min-height:44px;transform:rotate(90deg)}}
+
+  /* ledger T-account */
+  .taccts{display:grid; grid-template-columns:1fr 1fr; gap:0; border:1px solid var(--border-strong); border-radius:10px; overflow:hidden; font-family:var(--mono); font-size:13px; margin:14px 0}
+  .taccts .h{background:#f1f5f9; font-weight:700; padding:8px 12px; text-align:center; border-bottom:1px solid var(--border-strong)}
+  .taccts .h.dr{border-right:1px solid var(--border-strong)}
+  .taccts .col{padding:0}
+  .taccts .row{display:flex; justify-content:space-between; padding:7px 12px; border-bottom:1px solid var(--border)}
+  .taccts .col.dr .row{border-right:1px solid var(--border-strong)}
+  .taccts .row:last-child{border-bottom:none}
+  .dr-amt{color:#b45309} .cr-amt{color:var(--green)}
+
+  .pipe{counter-reset:step; margin:18px 0; padding:0; list-style:none}
+  .pipe > li{position:relative; padding:0 0 22px 52px; border-left:2px solid var(--border-strong); margin-left:16px}
+  .pipe > li:last-child{border-left-color:transparent}
+  .pipe > li::before{counter-increment:step; content:counter(step); position:absolute; left:-16px; top:-2px; width:32px; height:32px; border-radius:50%; background:var(--brand); color:#fff; font-weight:700; font-size:14px; display:flex; align-items:center; justify-content:center; box-shadow:0 0 0 4px var(--bg)}
+  .pipe h4{margin:0 0 3px; font-size:16px; font-weight:650}
+  .pipe .f{font:600 12px var(--mono); color:var(--ink-3)}
+  .pipe p{margin:6px 0 0; font-size:14.5px; color:var(--ink-2)}
+
+  .frontier{display:grid; grid-template-columns:1fr 1fr; gap:16px; margin:22px 0}
+  @media(max-width:820px){.frontier{grid-template-columns:1fr}}
+  .frontier .card{border-top:4px solid}
+  .frontier .built{border-top-color:var(--green)}
+  .frontier .plan{border-top-color:var(--amber)}
+  .frontier ul{margin:10px 0 0; padding-left:18px; font-size:14px; color:var(--ink-2)}
+  .frontier li{margin:5px 0}
+
+  .glossary dt{font-weight:700; margin-top:14px; font-size:15px}
+  .glossary dd{margin:2px 0 0; color:var(--ink-2); font-size:14.5px}
+  .glossary dl{margin:0}
+
+  footer{padding:40px 0 60px; color:var(--ink-3); font-size:13.5px; text-align:center}
+  .pill{display:inline-flex; gap:8px; align-items:center; background:var(--surface); border:1px solid var(--border); border-radius:999px; padding:6px 14px; font-size:13px; font-weight:600; color:var(--ink-2); margin:2px}
+</style>
+</head>
+<body>
+
+<header class="hero">
+  <div class="wrap">
+    <div class="kick">TransactWorld · Internal Explainer</div>
+    <h1>Reconciliation, from first principles</h1>
+    <p>How money moves from a cardholder to a merchant, why every party keeps its own book, and how this system proves those books agree — the part that's built, and the bank-side part that isn't yet.</p>
+    <div class="meta">Settlement &amp; Ledger platform · gateway→merchant (live) + bank→gateway (roadmap)</div>
+  </div>
+</header>
+
+<nav class="toc">
+  <div class="wrap">
+    <a href="#idea">The big idea</a>
+    <a href="#journey">Money's journey</a>
+    <a href="#frontiers">Two frontiers</a>
+    <a href="#ledger">Double-entry</a>
+    <a href="#workflow">Built workflow</a>
+    <a href="#recon-built">Recon (built)</a>
+    <a href="#bank">Bank→gateway</a>
+    <a href="#matching">Matching engine</a>
+    <a href="#example">Worked example</a>
+    <a href="#glossary">Glossary</a>
+  </div>
+</nav>
+
+<!-- ============================================================ -->
+<section id="idea"><div class="wrap">
+  <div class="num">01</div>
+  <h2>What reconciliation actually is</h2>
+  <p class="lead">Reconciliation is the practice of taking <strong>two independent records of the same money</strong> and proving they agree — then explaining every difference until none is left unexplained.</p>
+
+  <p>A single card payment is recorded by many parties: the cardholder's bank, the card network, the acquiring bank, the gateway, and the merchant. Each keeps its <em>own</em> ledger. None of them trusts the others blindly. Reconciliation is the discipline of comparing these records and asking one question over and over:</p>
+
+  <div class="callout key">
+    <div class="t">◆ The only question</div>
+    “Does the money I <strong>expected</strong> match the money that <strong>actually moved</strong> — and if not, exactly why?”
+  </div>
+
+  <p>Every unexplained difference is called a <strong>break</strong> (or exception). Recon isn't done when the totals match by luck — it's done when <em>every</em> break has a documented reason: a fee you didn't account for, a payout that's still in transit, a chargeback, an FX difference, a duplicate, a genuine error. Good reconciliation turns "the numbers are off by €412" into "the numbers are off by €412 <em>because</em> of these 6 specific items, and here's what to do about each."</p>
+
+  <div class="grid g3" style="margin-top:22px">
+    <div class="card"><strong>Source A</strong><p style="margin:6px 0 0;font-size:14px;color:var(--ink-2)">What our own system says happened (our ledger).</p></div>
+    <div class="card"><strong>Source B</strong><p style="margin:6px 0 0;font-size:14px;color:var(--ink-2)">What the counterparty says happened (their statement / file).</p></div>
+    <div class="card"><strong>The breaks</strong><p style="margin:6px 0 0;font-size:14px;color:var(--ink-2)">A − B, itemised and explained. This list is the product of reconciliation.</p></div>
+  </div>
+</div></section>
+
+<!-- ============================================================ -->
+<section id="journey"><div class="wrap">
+  <div class="num">02</div>
+  <h2>The money's journey (and who skims what)</h2>
+  <p class="lead">Before you can reconcile anything, you have to know the pipe the money flows through. A €100 card payment doesn't arrive as €100 anywhere downstream — each hop takes a fee.</p>
+
+  <div class="flow">
+    <div class="node"><div class="who">Cardholder</div><div class="role">pays €100</div></div>
+    <div class="arrow"><span class="ln">→</span><span class="amt">€100</span></div>
+    <div class="node"><div class="who">Issuing bank</div><div class="role">cardholder's bank</div></div>
+    <div class="arrow"><span class="ln">→</span><span class="fee">− interchange</span></div>
+    <div class="node"><div class="who">Card network</div><div class="role">Visa / Mastercard</div></div>
+    <div class="arrow"><span class="ln">→</span><span class="fee">− scheme fee</span></div>
+    <div class="node"><div class="who">Acquiring bank</div><div class="role">gateway's bank</div></div>
+    <div class="arrow"><span class="ln">→</span><span class="fee">− acquirer markup</span></div>
+    <div class="node" style="border-color:var(--brand)"><div class="who" style="color:var(--brand)">Gateway</div><div class="role">TransactWorld (you)</div></div>
+    <div class="arrow"><span class="ln">→</span><span class="fee">− MDR + fees</span><span class="amt">net</span></div>
+    <div class="node"><div class="who">Merchant</div><div class="role">gets the payout</div></div>
+  </div>
+
+  <div class="callout def">
+    <div class="t">▸ The fee stack, decoded</div>
+    <strong>Interchange</strong> goes to the <em>issuing</em> bank (largest slice, set by the networks). <strong>Scheme fees</strong> go to Visa/Mastercard. <strong>Acquirer markup</strong> is the acquiring bank's cut. Together these are the gateway's <em>cost of acceptance</em>. The <strong>MDR</strong> (Merchant Discount Rate) is what the gateway charges the <em>merchant</em> — and the gateway's real profit is <code>MDR − (interchange + scheme + acquirer)</code>, not the whole MDR.
+  </div>
+
+  <p>Two economic truths fall out of this diagram, and they define the two halves of the system:</p>
+  <div class="grid g2">
+    <div class="card"><span class="tag built">on the right</span><h3 style="margin-top:10px">Gateway owes the merchant</h3><p style="font-size:14.5px;margin:6px 0 0">You captured €100, you'll keep your MDR + fees + a rolling reserve, and you owe the merchant the net. This is a <strong>payable</strong>.</p></div>
+    <div class="card"><span class="tag plan">on the left</span><h3 style="margin-top:10px">The bank owes the gateway</h3><p style="font-size:14.5px;margin:6px 0 0">The acquirer collected the €100, will keep interchange + scheme + its markup, and owes <em>you</em> the rest. This is a <strong>receivable</strong>.</p></div>
+  </div>
+</div></section>
+
+<!-- ============================================================ -->
+<section id="frontiers"><div class="wrap">
+  <div class="num">03</div>
+  <h2>The two reconciliation frontiers</h2>
+  <p class="lead">This platform sits in the middle of the pipe, so it has two edges to reconcile. Today one edge is fully built; the other is the roadmap.</p>
+
+  <div class="frontier">
+    <div class="card built">
+      <span class="tag built">✓ BUILT</span>
+      <h3 style="margin-top:12px">Gateway → Merchant</h3>
+      <p style="font-size:14.5px;color:var(--ink-2);margin:6px 0 0"><em>“Did we pay each merchant exactly what we owe them?”</em></p>
+      <ul>
+        <li>Import processor transaction reports</li>
+        <li>Book MDR, per-txn fees, rolling reserve</li>
+        <li>Net into settlement statements (T+N)</li>
+        <li>Pay out &amp; produce a per-transaction breakdown</li>
+        <li>Reconcile: capture − fees − reserve = payout ✓</li>
+      </ul>
+    </div>
+    <div class="card plan">
+      <span class="tag plan">◷ ROADMAP</span>
+      <h3 style="margin-top:12px">Bank → Gateway</h3>
+      <p style="font-size:14.5px;color:var(--ink-2);margin:6px 0 0"><em>“Did the acquiring bank fund us exactly what we're owed?”</em></p>
+      <ul>
+        <li>Import the acquirer's settlement file</li>
+        <li>Decompose MDR into interchange / scheme / acquirer cost</li>
+        <li>Match expected funding vs actual deposit</li>
+        <li>Raise &amp; work <strong>breaks</strong> (missing, variance, timing, FX)</li>
+        <li>Reconcile: what we expected = what the bank paid ✓</li>
+      </ul>
+    </div>
+  </div>
+
+  <div class="callout key">
+    <div class="t">◆ Why they feel different</div>
+    The merchant side <strong>generates</strong> truth — the ledger decides what's owed and pays it. The bank side <strong>compares</strong> two truths — your ledger vs the bank's file — and surfaces disagreements. The first is a settlement engine; the second is a matching engine.
+  </div>
+</div></section>
+
+<!-- ============================================================ -->
+<section id="ledger"><div class="wrap">
+  <div class="num">04</div>
+  <h2>The double-entry ledger — why any of this is trustworthy</h2>
+  <p class="lead">Reconciliation is only as good as your own source of truth. This system's source of truth is a <strong>double-entry, append-only ledger</strong> — and that design is what makes it reconcilable at all.</p>
+
+  <div class="grid g2">
+    <div class="callout def" style="margin:0">
+      <div class="t">▸ Double-entry</div>
+      Every event is recorded as balanced <strong>legs</strong> — debits and credits that sum to <strong>exactly zero</strong>. Money is never created or destroyed, only moved between accounts. A database trigger rejects any event that doesn't balance.
+    </div>
+    <div class="callout def" style="margin:0">
+      <div class="t">▸ Append-only</div>
+      Rows are <strong>never updated or deleted</strong> — triggers forbid it. A correction is a <em>new</em> reversing event. This means the ledger is a permanent audit trail: you can always replay exactly how a balance got to where it is.
+    </div>
+  </div>
+
+  <h3>The accounts in play</h3>
+  <table>
+    <thead><tr><th>Account</th><th>Holds</th><th>Side</th></tr></thead>
+    <tbody>
+      <tr><td><code>clearing</code></td><td>Money in transit through the gateway. <em>Currently a stand-in for the whole bank leg.</em></td><td>—</td></tr>
+      <tr><td><code>merchant_payable</code></td><td>What we owe a merchant right now</td><td class="tag built">gateway→merchant</td></tr>
+      <tr><td><code>merchant_reserve</code></td><td>Rolling reserve held back against future risk</td><td class="tag built">gateway→merchant</td></tr>
+      <tr><td><code>settlement_payable</code></td><td>A settled batch queued for payout</td><td class="tag built">gateway→merchant</td></tr>
+      <tr><td><code>gateway_revenue</code></td><td>Fees we earned (today: the whole MDR)</td><td class="tag built">gateway→merchant</td></tr>
+      <tr><td><code>chargeback_suspense</code></td><td>Disputed funds in limbo</td><td class="tag built">gateway→merchant</td></tr>
+      <tr><td><code>tax_payable</code></td><td>Tax withheld</td><td class="tag built">gateway→merchant</td></tr>
+      <tr><td class="mono" style="color:var(--amber)">acquirer_receivable*</td><td>What the bank owes us, not yet funded</td><td class="tag plan">to add</td></tr>
+      <tr><td class="mono" style="color:var(--amber)">gateway_bank / nostro*</td><td>Real cash that actually landed in our bank</td><td class="tag plan">to add</td></tr>
+      <tr><td class="mono" style="color:var(--amber)">interchange / scheme / acquirer_expense*</td><td>The true cost components of MDR</td><td class="tag plan">to add</td></tr>
+    </tbody>
+  </table>
+
+  <h3>What a €100 capture looks like as ledger legs</h3>
+  <p>Merchant on 6.5% MDR + €0.35 approved fee, 10% rolling reserve. The capture posts <em>two</em> balanced events:</p>
+
+  <div class="taccts">
+    <div class="h dr">DEBIT</div><div class="h">CREDIT</div>
+    <div class="col dr">
+      <div class="row"><span>clearing</span><span class="dr-amt">100.00</span></div>
+    </div>
+    <div class="col">
+      <div class="row"><span>merchant_payable</span><span class="cr-amt">93.15</span></div>
+      <div class="row"><span>gateway_revenue (MDR+fee)</span><span class="cr-amt">6.85</span></div>
+    </div>
+  </div>
+  <div style="font:600 12px var(--mono);color:var(--ink-3);margin:-4px 0 10px">event: payment_captured — balances to 0 ✓</div>
+
+  <div class="taccts">
+    <div class="h dr">DEBIT</div><div class="h">CREDIT</div>
+    <div class="col dr">
+      <div class="row"><span>merchant_payable</span><span class="dr-amt">9.32</span></div>
+    </div>
+    <div class="col">
+      <div class="row"><span>merchant_reserve</span><span class="cr-amt">9.32</span></div>
+    </div>
+  </div>
+  <div style="font:600 12px var(--mono);color:var(--ink-3);margin:-4px 0 4px">event: reserve_hold — balances to 0 ✓ (reserve is 10% of the €93.15 payable)</div>
+
+  <div class="callout code-note">
+    <div class="t">⌘ In this codebase</div>
+    Posting lives in <code>ledger.py</code> (<code>post_event</code> / <code>BulkPoster</code>); the zero-sum and append-only rules are DB triggers in <code>schema.sql</code>. The two events above are emitted by <code>importer.py → _post_transaction()</code>. Notice the reserve is a <em>separate</em> event sharing the same <code>source_txn_id</code> — which is why the per-transaction settlement view groups them back into one line.
+  </div>
+</div></section>
+
+<!-- ============================================================ -->
+<section id="workflow"><div class="wrap">
+  <div class="num">05</div>
+  <h2>The built workflow, step by step <span class="tag built">gateway → merchant</span></h2>
+  <p class="lead">This is the full pipeline that runs today, from a raw processor file to a merchant payout with a reconciled statement.</p>
+
+  <ol class="pipe">
+    <li>
+      <h4>Import the processor reports</h4>
+      <div class="f">admin.py · importer.py</div>
+      <p>Admin uploads the gateway's transaction CSVs (and the settlement workbook). Each row becomes a <code>transactions</code> record. Deduplication is on <code>(merchant_id, upstream_payment_id)</code> — re-uploading the same file posts nothing.</p>
+    </li>
+    <li>
+      <h4>Quarantine unknown merchants</h4>
+      <div class="f">importer.py → known_rates()</div>
+      <p>If we don't hold a real rate card for a merchant, they're imported but <strong>quarantined</strong> (<code>ledger_posted = false</code>) — <em>no</em> ledger events, no assumed 5% MDR. Nothing is booked until someone assigns a fee schedule. This prevents inventing revenue for merchants we haven't priced.</p>
+    </li>
+    <li>
+      <h4>Onboard &amp; assign fees</h4>
+      <div class="f">onboarding.py → assign_fee_schedule()</div>
+      <p>Assigning a schedule (or a saved preset like <em>Workbook</em>/<em>Canamoney</em>) activates the merchant and <strong>replays</strong> their quarantined transactions into real ledger events — atomically, in one transaction.</p>
+    </li>
+    <li>
+      <h4>Book the economics on each capture</h4>
+      <div class="f">importer.py → _post_transaction()</div>
+      <p>For every capture: deduct <strong>MDR</strong> + approved fee (→ <code>gateway_revenue</code>), credit the merchant's <strong>payable</strong>, and hold a <strong>rolling reserve</strong>. Declines may carry a decline fee; refunds reverse principal + a refund fee. Each event is stamped with a <code>settle_after</code> date = occurred + <strong>T+N</strong> delay.</p>
+    </li>
+    <li>
+      <h4>Run the settlement cycle</h4>
+      <div class="f">cycle.py → run_cycle() · settle.py → generate()</div>
+      <p>On a chosen <code>cutoff</code>, the engine sweeps <em>every</em> unsettled payable event with <code>settle_after ≤ cutoff</code>, nets them per merchant×currency, deducts the settlement fee, and creates a <strong>settlement</strong>. Deficits (net ≤ 0) are skipped and carry forward. This is idempotent per cutoff date.</p>
+    </li>
+    <li>
+      <h4>Pay out &amp; complete</h4>
+      <div class="f">settle.py → complete()</div>
+      <p>The settled batch moves <code>settlement_payable → clearing</code> with a payout reference — the simulated bank rail. (Wiring a real SEPA/USDC rail is the only missing piece here.)</p>
+    </li>
+    <li>
+      <h4>Release rolling reserves when due</h4>
+      <div class="f">cycle.py → release_due_reserves()</div>
+      <p>Holds whose <code>release_due_at</code> has arrived are released back to payable (a <code>reserve_release</code> event) so they settle in that cycle — the reserve was insurance against chargebacks that never came.</p>
+    </li>
+    <li>
+      <h4>Produce the statement &amp; per-transaction breakdown</h4>
+      <div class="f">settle.py → line_items() · SettlementDetail.tsx</div>
+      <p>The merchant (and admin) see a settlement statement <em>and</em> a per-transaction view showing the exact charges on each payment — gross, MDR, fees, reserve, net — exportable to CSV / Excel, with the statement printable to PDF.</p>
+    </li>
+  </ol>
+</div></section>
+
+<!-- ============================================================ -->
+<section id="recon-built"><div class="wrap">
+  <div class="num">06</div>
+  <h2>Where reconciliation lives in the built side</h2>
+  <p class="lead">On the merchant side, the ledger <em>is</em> the truth, so recon is mostly about proving the ledger's internal consistency and that each statement ties out.</p>
+
+  <div class="grid g2">
+    <div class="card">
+      <h3 style="margin-top:0">Internal integrity checks</h3>
+      <p style="font-size:14.5px;margin:6px 0 0">Every event balances to zero (enforced), the ledger is append-only (enforced), and account balances equal the sum of their entries. The <strong>Integrity</strong> page surfaces these continuously — if any invariant broke, you'd see it.</p>
+    </div>
+    <div class="card">
+      <h3 style="margin-top:0">Idempotency = dedup recon</h3>
+      <p style="font-size:14.5px;margin:6px 0 0">Two idempotency keys prevent double-counting: <code>(merchant_id, upstream_payment_id)</code> on transactions, and <code>(source_type, source_id)</code> on ledger postings. Re-importing or re-running a cycle can't post the same money twice.</p>
+    </div>
+  </div>
+
+  <h3>The statement tie-out</h3>
+  <p>A merchant settlement reconciles by construction:</p>
+  <div class="callout key">
+    <div class="t">◆ The identity that must hold</div>
+    <span class="mono" style="font-size:14px">gross captured − MDR − txn fees − refunds − reserve held + reserve released − settlement fee = <strong>net payout</strong></span>
+  </div>
+  <p>The per-transaction export exists precisely so a recon person (or the merchant) can drill from that one net number down to the individual payments behind it, and confirm each charge. The line items sum to the statement subtotal; the settlement fee is the one statement-level charge on top.</p>
+
+  <div class="callout warn">
+    <div class="t">⚠ The honest gap</div>
+    Today the merchant side reconciles against <em>itself</em>. It does <strong>not</strong> yet reconcile against the <em>bank</em> — so it can't tell you whether the money you paid merchants actually arrived from the acquirer, or whether the acquirer's fees matched what you assumed. That's the entire point of the next section.
+  </div>
+</div></section>
+
+<!-- ============================================================ -->
+<section id="bank"><div class="wrap">
+  <div class="num">07</div>
+  <h2>The bank → gateway side <span class="tag plan">roadmap</span></h2>
+  <p class="lead">This is the missing half: reconciling what the acquiring bank actually funds you against what your own ledger says you're owed. It's <strong>additive</strong> — new accounts and new events, nothing to rewrite.</p>
+
+  <div class="callout key">
+    <div class="t">◆ The one central refactor</div>
+    Right now <code>clearing</code> is a magic infinite bucket silently doing the bank's job. The whole bank-side build is really about <strong>splitting <code>clearing</code></strong> into real accounts: <code>acquirer_receivable</code> (what the bank owes us), <code>gateway_bank</code> (cash that actually landed), and the cost accounts. Once money-in-transit is explicit, everything else follows.
+  </div>
+
+  <h3>What you add, in order</h3>
+  <ol class="pipe">
+    <li>
+      <h4>New ledger accounts (the bank leg)</h4>
+      <p><code>acquirer_receivable</code>, <code>gateway_bank</code>/<code>nostro</code>, and the cost accounts <code>interchange_expense</code>, <code>scheme_fee_expense</code>, <code>acquirer_fee_expense</code> (plus <code>fx_gain_loss</code> if the bank funds in a different currency, and optionally an acquirer-held reserve).</p>
+    </li>
+    <li>
+      <h4>Decompose the MDR into real cost</h4>
+      <p>Today <code>gateway_revenue</code> = the full MDR, which overstates profit. Split each capture's cost into interchange + scheme + acquirer, so <strong>true margin = MDR − those costs</strong> becomes a real, per-transaction number.</p>
+    </li>
+    <li>
+      <h4>Model acquirers &amp; MIDs</h4>
+      <p>A gateway routes through several acquiring banks. Your <code>transactions.mid</code> field already exists — add an <code>acquirers</code> table mapping MID → acquirer, each with its own currency, funding timing (bank T+1/T+2), and cost schedule.</p>
+    </li>
+    <li>
+      <h4>Ingest the acquirer settlement file</h4>
+      <p>The mirror of your processor importer: the bank's daily settlement report → <code>acquirer_settlements</code> (batch header: gross, fees, net, funding date, reference) + <code>acquirer_settlement_items</code> (links to your transactions).</p>
+    </li>
+    <li>
+      <h4>Run the matching engine</h4>
+      <p>For each batch, compare <strong>expected</strong> (Σ captures − expected interchange/scheme/acquirer) against <strong>actual</strong> (what the bank deposited). Produce <strong>breaks</strong>. — detailed next section.</p>
+    </li>
+    <li>
+      <h4>Work the breaks</h4>
+      <p>An exception workflow: unmatched items with statuses (matched / unmatched / disputed / written-off), notes, assignment. This screen is where a recon analyst spends their day.</p>
+    </li>
+    <li>
+      <h4>Unlock true reporting</h4>
+      <p>Real per-transaction <strong>margin</strong>, a <strong>treasury/cash position</strong> (receivable from acquirer vs cash funded vs owed to merchants), and <strong>funding-timing exposure</strong> — the working capital gap when you pay merchants T+0 but get funded T+2.</p>
+    </li>
+  </ol>
+
+  <div class="callout warn">
+    <div class="t">⚠ The hard part, named honestly</div>
+    Real <strong>interchange</strong> is a giant matrix (card type × region × MCC × more). Don't model it fully on day one — start with a <strong>blended rate per acquirer</strong> and refine. The matching engine and break workflow are where the actual value is; the fee tables can stay coarse for a long time.
+  </div>
+</div></section>
+
+<!-- ============================================================ -->
+<section id="matching"><div class="wrap">
+  <div class="num">08</div>
+  <h2>The matching engine, explained</h2>
+  <p class="lead">Matching is the mechanical heart of bank reconciliation: line up two lists of money and classify every line as <em>matched</em> or as a specific kind of <em>break</em>.</p>
+
+  <h3>How lines get matched</h3>
+  <p>Each transaction in your ledger and each line in the acquirer's file get a <strong>match key</strong> — typically the payment/ARN reference, or (amount + date + MID) when no shared ID exists. The engine joins on the key, then compares amounts within a <strong>tolerance</strong> (rounding, FX). Whatever doesn't cleanly match becomes a break.</p>
+
+  <h3>The break taxonomy</h3>
+  <table>
+    <thead><tr><th>Break type</th><th>Means</th><th>Typical cause</th></tr></thead>
+    <tbody>
+      <tr><td><strong>Missing deposit</strong></td><td>We expected funding; the bank didn't pay it</td><td>Still in transit, or genuinely dropped</td></tr>
+      <tr><td><strong>Unexpected credit</strong></td><td>Bank paid something we have no record of</td><td>Timing, or a txn we failed to import</td></tr>
+      <tr><td><strong>Amount variance</strong></td><td>Same txn, different amount</td><td>Partial capture, rounding, FX</td></tr>
+      <tr><td><strong>Fee variance</strong></td><td>Bank's fees ≠ what we expected</td><td>Wrong/updated interchange or markup</td></tr>
+      <tr><td><strong>Timing difference</strong></td><td>Right money, wrong day</td><td>Captured T+0, funded T+2</td></tr>
+      <tr><td><strong>FX difference</strong></td><td>Converted at a different rate</td><td>Bank's FX rate vs ours</td></tr>
+      <tr><td><strong>Duplicate</strong></td><td>Same money appears twice</td><td>Re-sent file, double capture</td></tr>
+      <tr><td><strong>Unmatched</strong></td><td>No counterpart on either side</td><td>Investigate — could be anything</td></tr>
+    </tbody>
+  </table>
+
+  <h3>The break lifecycle</h3>
+  <div class="flow" style="margin-top:10px">
+    <div class="node"><div class="who">Open</div><div class="role">engine raised it</div></div>
+    <div class="arrow"><span class="ln">→</span></div>
+    <div class="node"><div class="who">Investigating</div><div class="role">assigned to analyst</div></div>
+    <div class="arrow"><span class="ln">→</span></div>
+    <div class="node"><div class="who">Explained</div><div class="role">cause found</div></div>
+    <div class="arrow"><span class="ln">→</span></div>
+    <div class="node"><div class="who">Resolved</div><div class="role">matched / adjusted</div></div>
+    <div class="arrow"><span class="ln">→</span></div>
+    <div class="node"><div class="who">Written-off</div><div class="role">accepted loss</div></div>
+  </div>
+  <p style="font-size:14.5px;color:var(--ink-2)">Crucially, a resolution that moves money posts a <strong>new ledger event</strong> (an adjustment or a booked cost) — never an edit to history. The append-only ledger and the break log stay in lockstep.</p>
+</div></section>
+
+<!-- ============================================================ -->
+<section id="example"><div class="wrap">
+  <div class="num">09</div>
+  <h2>One payment, both sides — a worked example</h2>
+  <p class="lead">Follow a single €100 card payment all the way through, and watch reconciliation prove out on each edge.</p>
+
+  <h3>Gateway → Merchant <span class="tag built">built</span></h3>
+  <table>
+    <thead><tr><th>Line</th><th class="r">Amount (€)</th><th>Where</th></tr></thead>
+    <tbody>
+      <tr><td>Gross captured</td><td class="r mono">100.00</td><td><code>clearing</code> debited</td></tr>
+      <tr><td>− MDR (6.5%)</td><td class="r mono">6.50</td><td>→ <code>gateway_revenue</code></td></tr>
+      <tr><td>− Approved fee</td><td class="r mono">0.35</td><td>→ <code>gateway_revenue</code></td></tr>
+      <tr><td>= Payable to merchant</td><td class="r mono">93.15</td><td><code>merchant_payable</code></td></tr>
+      <tr><td>− Rolling reserve (10%)</td><td class="r mono">9.32</td><td>→ <code>merchant_reserve</code> (released later)</td></tr>
+      <tr><td><strong>Net this cycle</strong> (before settlement fee)</td><td class="r mono"><strong>83.83</strong></td><td>into the settlement</td></tr>
+    </tbody>
+  </table>
+  <p style="font-size:14px;color:var(--ink-2)"><strong>Recon ✓</strong> — the statement's per-transaction line for this payment shows exactly these numbers, and they sum into the batch. The reserve €9.32 returns to a future settlement when its hold elapses.</p>
+
+  <h3>Bank → Gateway <span class="tag plan">roadmap</span></h3>
+  <table>
+    <thead><tr><th>Line</th><th class="r">Amount (€)</th><th>Where</th></tr></thead>
+    <tbody>
+      <tr><td>Gross processed</td><td class="r mono">100.00</td><td>—</td></tr>
+      <tr><td>− Interchange (~1.5%)</td><td class="r mono">1.50</td><td>→ <code>interchange_expense</code></td></tr>
+      <tr><td>− Scheme fee (~0.15%)</td><td class="r mono">0.15</td><td>→ <code>scheme_fee_expense</code></td></tr>
+      <tr><td>− Acquirer markup (~0.5%)</td><td class="r mono">0.50</td><td>→ <code>acquirer_fee_expense</code></td></tr>
+      <tr><td><strong>Bank funds us</strong> (T+2)</td><td class="r mono"><strong>97.85</strong></td><td>→ <code>gateway_bank</code></td></tr>
+    </tbody>
+  </table>
+  <p style="font-size:14px;color:var(--ink-2)"><strong>Recon:</strong> our ledger <em>expected</em> <span class="mono">100.00 − 2.15 = 97.85</span>. The bank's file <em>says</em> <span class="mono">97.85</span>. Match ✓. Had the file said <span class="mono">97.50</span>, the engine raises a <strong>€0.35 fee-variance break</strong> for an analyst.</p>
+
+  <div class="callout key">
+    <div class="t">◆ And now the number that matters</div>
+    The gateway charged the merchant <span class="mono">6.85</span> (MDR + fee) but its real cost of acceptance was <span class="mono">2.15</span>. <strong>True gross margin on this payment = €4.70</strong> — a figure you literally cannot compute until <em>both</em> reconciliation frontiers exist. That's the payoff of building the bank side.
+  </div>
+</div></section>
+
+<!-- ============================================================ -->
+<section id="glossary"><div class="wrap">
+  <div class="num">10</div>
+  <h2>Glossary</h2>
+  <div class="glossary grid g2">
+    <dl>
+      <dt>Acquirer / Acquiring bank</dt><dd>The bank that holds the gateway's merchant account and funds the gateway for captured payments.</dd>
+      <dt>Issuer / Issuing bank</dt><dd>The cardholder's bank. Receives interchange.</dd>
+      <dt>Interchange</dt><dd>Fee paid to the issuer, set by the card networks. Usually the biggest cost slice.</dd>
+      <dt>Scheme fee</dt><dd>Assessment paid to Visa/Mastercard for using their network.</dd>
+      <dt>MDR (Merchant Discount Rate)</dt><dd>The blended % the gateway charges the merchant. Covers all the above plus the gateway's margin.</dd>
+      <dt>MID</dt><dd>Merchant ID at the acquirer — identifies which bank account/route a transaction settled through.</dd>
+      <dt>Capture</dt><dd>Finalising an authorised payment so the money can actually move.</dd>
+      <dt>Settlement</dt><dd>Netting a batch of transactions into a single amount owed, then paying it.</dd>
+    </dl>
+    <dl>
+      <dt>Clearing account</dt><dd>A holding account for money in transit. Here, currently a stand-in for the whole bank leg.</dd>
+      <dt>Rolling reserve</dt><dd>A % of each payout held back for a period, as insurance against future chargebacks/refunds.</dd>
+      <dt>Chargeback</dt><dd>A cardholder-initiated forced reversal; the acquirer debits the gateway, who debits the merchant.</dd>
+      <dt>T+N</dt><dd>Funds settle N business days after the transaction. T+0 = same day; T+2 = two days later.</dd>
+      <dt>Nostro</dt><dd>The gateway's own cash account at a bank (“our money at their bank”).</dd>
+      <dt>Break / Exception</dt><dd>An unexplained difference between two records. The output of reconciliation.</dd>
+      <dt>Idempotency</dt><dd>A guarantee that doing the same operation twice has the same effect as once — no double-counting.</dd>
+      <dt>Double-entry</dt><dd>Every event recorded as balanced debits and credits summing to zero.</dd>
+    </dl>
+  </div>
+</div></section>
+
+<footer>
+  <div class="wrap">
+    <span class="pill">✓ gateway→merchant: live</span>
+    <span class="pill">◷ bank→gateway: roadmap</span>
+    <div style="margin-top:14px">TransactWorld · Settlement &amp; Ledger — internal reconciliation explainer · for demonstration</div>
+  </div>
+</footer>
+
+</body>
+</html>

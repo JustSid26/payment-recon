@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import { api, ApiError, getUser } from '../lib/api'
 import { useApi } from '../lib/useApi'
@@ -7,7 +7,37 @@ import { fmtDate, fmtDateTime, fmtInt, fmtMoney, fmtMoneySigned } from '../lib/m
 import { LoadingBlock, StatusChip, toastError, toastSuccess } from '../components/ui'
 import { downloadCSV, downloadExcel, printToPDF, toMajor } from '../lib/export'
 
-type View = 'statement' | 'lines'
+type View = 'statement' | 'daily' | 'lines'
+
+interface SettlementDayRow {
+  date: string
+  txns: number
+  payments: number
+  declines: number
+  refunds: number
+  chargebacks: number
+  gross_minor: number
+  refunds_minor: number
+  chargebacks_minor: number
+  mdr_minor: number
+  approved_fee_minor: number
+  declined_fee_minor: number
+  refund_fee_minor: number
+  chargeback_fee_minor: number
+  reserve_held_minor: number
+  reserve_released_minor: number
+  adjustments_minor: number
+  net_minor: number
+  settlement_fee_minor: number
+  payout_minor: number
+}
+
+interface SettlementCounts {
+  paid: number
+  declined: number
+  refunds: number
+  chargebacks: number
+}
 
 const TYPE_LABEL: Record<string, string> = {
   payment_captured: 'Payment',
@@ -29,6 +59,7 @@ function Row({
   minor,
   currency,
   op,
+  detail,
   dimZero,
   className,
 }: {
@@ -36,6 +67,7 @@ function Row({
   minor: number
   currency: string
   op?: string
+  detail?: string
   dimZero?: boolean
   className?: string
 }) {
@@ -45,6 +77,7 @@ function Row({
       <td className="row-label">
         <span className="op">{op ?? ''}</span>
         {label}
+        {detail && <span className="rate-basis">{detail}</span>}
       </td>
       <td className={dim ? 'dim' : minor < 0 ? 'money neg' : 'money'}>
         {dim ? '—' : fmtMoneySigned(minor, currency)}
@@ -54,6 +87,127 @@ function Row({
 }
 
 const slug = (s: string) => s.replace(/[^a-z0-9]+/gi, '-').replace(/^-|-$/g, '').toLowerCase()
+
+const fmtPct = (bps: number) => `${(bps / 100).toFixed(2)}%`
+
+const fixedBasis = (minor: number | undefined | null, ccy: string) =>
+  minor == null ? undefined : fmtMoney(minor, ccy)
+
+const percentBasis = (bps: number | undefined | null) => (bps == null ? undefined : fmtPct(bps))
+
+const basisLabel = (basis?: string) => (basis ? `(${basis})` : undefined)
+
+const dayKey = (iso: string) => {
+  const d = new Date(iso)
+  return isNaN(d.getTime()) ? iso.slice(0, 10) : d.toISOString().slice(0, 10)
+}
+
+const isDeclineLine = (it: SettlementLineItem) => it.type === 'decline_fee' || it.status === 'auth_failed'
+const isRefundLine = (it: SettlementLineItem) => it.type === 'refund' || it.gross_minor < 0
+const isChargebackLine = (it: SettlementLineItem) => it.type.startsWith('chargeback')
+const isPaymentLine = (it: SettlementLineItem) =>
+  !isDeclineLine(it) && !isRefundLine(it) && !isChargebackLine(it) && (it.type === 'payment_captured' || it.gross_minor > 0)
+
+function countLineItems(items: SettlementLineItem[]): SettlementCounts {
+  return items.reduce(
+    (acc, it) => {
+      if (isDeclineLine(it)) acc.declined += 1
+      else if (isRefundLine(it)) acc.refunds += 1
+      else if (isChargebackLine(it)) acc.chargebacks += 1
+      else if (isPaymentLine(it)) acc.paid += 1
+      return acc
+    },
+    { paid: 0, declined: 0, refunds: 0, chargebacks: 0 },
+  )
+}
+
+function displayCounts(saved: SettlementDetail['counts'], items: SettlementLineItem[]): SettlementCounts {
+  const base = {
+    paid: saved?.paid ?? 0,
+    declined: saved?.declined ?? 0,
+    refunds: saved?.refunds ?? 0,
+    chargebacks: saved?.chargebacks ?? 0,
+  }
+  if (items.length === 0) return base
+  const derived = countLineItems(items)
+  return {
+    paid: base.paid || derived.paid,
+    declined: base.declined || derived.declined,
+    refunds: Math.max(base.refunds, derived.refunds),
+    chargebacks: Math.max(base.chargebacks, derived.chargebacks),
+  }
+}
+
+function buildDayRows(items: SettlementLineItem[], settlementFeeMinor: number): SettlementDayRow[] {
+  const byDay = new Map<string, SettlementDayRow>()
+  for (const it of items) {
+    const date = dayKey(it.occurred_at)
+    const row = byDay.get(date) ?? {
+      date,
+      txns: 0,
+      payments: 0,
+      declines: 0,
+      refunds: 0,
+      chargebacks: 0,
+      gross_minor: 0,
+      refunds_minor: 0,
+      chargebacks_minor: 0,
+      mdr_minor: 0,
+      approved_fee_minor: 0,
+      declined_fee_minor: 0,
+      refund_fee_minor: 0,
+      chargeback_fee_minor: 0,
+      reserve_held_minor: 0,
+      reserve_released_minor: 0,
+      adjustments_minor: 0,
+      net_minor: 0,
+      settlement_fee_minor: 0,
+      payout_minor: 0,
+    }
+    row.txns += 1
+    if (isDeclineLine(it)) row.declines += 1
+    else if (isRefundLine(it)) row.refunds += 1
+    else if (isChargebackLine(it)) row.chargebacks += 1
+    else if (isPaymentLine(it)) row.payments += 1
+    if (it.gross_minor > 0) row.gross_minor += it.gross_minor
+    if (isRefundLine(it)) row.refunds_minor += Math.abs(Math.min(it.gross_minor, 0))
+    if (isChargebackLine(it)) row.chargebacks_minor += Math.abs(Math.min(it.gross_minor, 0))
+    row.mdr_minor += it.mdr_minor
+    row.approved_fee_minor += it.approved_fee_minor
+    row.declined_fee_minor += it.declined_fee_minor
+    row.refund_fee_minor += it.refund_fee_minor
+    row.chargeback_fee_minor += it.chargeback_fee_minor
+    if (it.reserve_minor > 0) row.reserve_held_minor += it.reserve_minor
+    if (it.reserve_minor < 0) row.reserve_released_minor += Math.abs(it.reserve_minor)
+    row.net_minor += it.net_minor
+    byDay.set(date, row)
+  }
+  const rows = Array.from(byDay.values()).sort((a, b) => a.date.localeCompare(b.date))
+  const fee = Math.abs(settlementFeeMinor)
+  const bases = rows.map((d) => Math.max(d.net_minor, 0))
+  const totalBase = bases.reduce((a, n) => a + n, 0)
+  if (fee > 0 && totalBase > 0) {
+    const allocations = bases.map((basis) => Math.floor((fee * basis) / totalBase))
+    const allocated = allocations.reduce((a, n) => a + n, 0)
+    let lastPositive = -1
+    for (let i = bases.length - 1; i >= 0; i -= 1) {
+      if (bases[i] > 0) {
+        lastPositive = i
+        break
+      }
+    }
+    if (lastPositive >= 0) allocations[lastPositive] += fee - allocated
+    rows.forEach((row, i) => {
+      row.settlement_fee_minor = allocations[i]
+      row.payout_minor = row.net_minor - allocations[i]
+    })
+  } else {
+    rows.forEach((row) => {
+      row.payout_minor = row.net_minor
+    })
+  }
+  return rows
+}
 
 export default function SettlementDetailPage() {
   const { uuid } = useParams<{ uuid: string }>()
@@ -89,6 +243,9 @@ export default function SettlementDetailPage() {
   const ccy = s.currency
   const base = `settlement-${slug(s.merchant_name)}-${ccy}-${fmtDate(s.window_end).replace(/ /g, '')}`
   const items = lines.data?.items ?? []
+  const days = buildDayRows(items, b.settlement_fee_minor)
+  const counts = displayCounts(s.counts, items)
+  const fs = s.fee_schedule
 
   // --- statement export (key/value, mirrors the printed statement) ---
   const statementRows = (): (string | number)[][] => [
@@ -99,21 +256,37 @@ export default function SettlementDetailPage() {
     ['State', s.state],
     ['Items', s.items_count],
     [],
-    ['Line', `Amount (${ccy})`],
-    ['Gross captured', toMajor(b.gross_captured_minor, ccy)],
-    ['MDR', -toMajor(Math.abs(b.mdr_minor), ccy)],
-    ['Approved transaction fees', -toMajor(Math.abs(b.approved_txn_fees_minor), ccy)],
-    ['Declined transaction fees', -toMajor(Math.abs(b.declined_txn_fees_minor), ccy)],
-    ['Refunds', -toMajor(Math.abs(b.refunds_minor), ccy)],
-    ['Refund fees', -toMajor(Math.abs(b.refund_fees_minor), ccy)],
-    ['Chargebacks', -toMajor(Math.abs(b.chargebacks_minor), ccy)],
-    ['Chargeback fees', -toMajor(Math.abs(b.chargeback_fees_minor), ccy)],
-    ['Reserve held', -toMajor(Math.abs(b.reserve_held_minor), ccy)],
-    ['Reserve released', toMajor(Math.abs(b.reserve_released_minor), ccy)],
-    ['Adjustments', toMajor(b.adjustments_minor, ccy)],
-    ['Subtotal', toMajor(b.subtotal_minor, ccy)],
-    ['Settlement fee', -toMajor(Math.abs(b.settlement_fee_minor), ccy)],
-    ['NET PAYOUT', toMajor(b.net_payout_minor, ccy)],
+    ['Line', 'Rate / basis', `Amount (${ccy})`],
+    ['Gross captured', '', toMajor(b.gross_captured_minor, ccy)],
+    ['MDR', basisLabel(percentBasis(fs?.mdr_bps)) ?? '', -toMajor(Math.abs(b.mdr_minor), ccy)],
+    [
+      'Approved transaction fees',
+      basisLabel(fixedBasis(fs?.approved_txn_fee_minor, ccy)) ?? '',
+      -toMajor(Math.abs(b.approved_txn_fees_minor), ccy),
+    ],
+    [
+      'Declined transaction fees',
+      basisLabel(fixedBasis(fs?.declined_txn_fee_minor, ccy)) ?? '',
+      -toMajor(Math.abs(b.declined_txn_fees_minor), ccy),
+    ],
+    ['Refunds', '', -toMajor(Math.abs(b.refunds_minor), ccy)],
+    [
+      'Refund fees',
+      basisLabel(fixedBasis(fs?.refund_fee_minor, ccy)) ?? '',
+      -toMajor(Math.abs(b.refund_fees_minor), ccy),
+    ],
+    ['Chargebacks', '', -toMajor(Math.abs(b.chargebacks_minor), ccy)],
+    [
+      'Chargeback fees',
+      basisLabel(fixedBasis(fs?.chargeback_fee_minor, ccy)) ?? '',
+      -toMajor(Math.abs(b.chargeback_fees_minor), ccy),
+    ],
+    ['Reserve held', basisLabel(percentBasis(fs?.reserve_hold_bps)) ?? '', -toMajor(Math.abs(b.reserve_held_minor), ccy)],
+    ['Reserve released', '', toMajor(Math.abs(b.reserve_released_minor), ccy)],
+    ['Adjustments', '', toMajor(b.adjustments_minor, ccy)],
+    ['Subtotal', '', toMajor(b.subtotal_minor, ccy)],
+    ['Settlement fee', basisLabel(percentBasis(fs?.settlement_fee_bps)) ?? '', -toMajor(Math.abs(b.settlement_fee_minor), ccy)],
+    ['NET PAYOUT', '', toMajor(b.net_payout_minor, ccy)],
   ]
 
   const LINE_HEADER = [
@@ -140,16 +313,86 @@ export default function SettlementDetailPage() {
     ]),
   ]
 
+  const dayRows = (): (string | number)[][] => [
+    [
+      'Processing date',
+      'Transactions',
+      'Payments',
+      'Declines',
+      'Refunds',
+      'Chargebacks',
+      `Gross (${ccy})`,
+      `MDR (${ccy})`,
+      `Approved fees (${ccy})`,
+      `Declined fees (${ccy})`,
+      `Refunds (${ccy})`,
+      `Refund fees (${ccy})`,
+      `Chargebacks (${ccy})`,
+      `Chargeback fees (${ccy})`,
+      `Reserve held (${ccy})`,
+      `Reserve released (${ccy})`,
+      `Subtotal (${ccy})`,
+      `Allocated settlement fee (${ccy})`,
+      `Day net payout (${ccy})`,
+    ],
+    ...days.map((d) => [
+      d.date,
+      d.txns,
+      d.payments,
+      d.declines,
+      d.refunds,
+      d.chargebacks,
+      toMajor(d.gross_minor, ccy),
+      -toMajor(Math.abs(d.mdr_minor), ccy),
+      -toMajor(Math.abs(d.approved_fee_minor), ccy),
+      -toMajor(Math.abs(d.declined_fee_minor), ccy),
+      -toMajor(Math.abs(d.refunds_minor), ccy),
+      -toMajor(Math.abs(d.refund_fee_minor), ccy),
+      -toMajor(Math.abs(d.chargebacks_minor), ccy),
+      -toMajor(Math.abs(d.chargeback_fee_minor), ccy),
+      -toMajor(Math.abs(d.reserve_held_minor), ccy),
+      toMajor(Math.abs(d.reserve_released_minor), ccy),
+      toMajor(d.net_minor, ccy),
+      -toMajor(Math.abs(d.settlement_fee_minor), ccy),
+      toMajor(d.payout_minor, ccy),
+    ]),
+    [
+      'TOTAL',
+      days.reduce((a, d) => a + d.txns, 0),
+      days.reduce((a, d) => a + d.payments, 0),
+      days.reduce((a, d) => a + d.declines, 0),
+      days.reduce((a, d) => a + d.refunds, 0),
+      days.reduce((a, d) => a + d.chargebacks, 0),
+      toMajor(days.reduce((a, d) => a + d.gross_minor, 0), ccy),
+      -toMajor(Math.abs(days.reduce((a, d) => a + d.mdr_minor, 0)), ccy),
+      -toMajor(Math.abs(days.reduce((a, d) => a + d.approved_fee_minor, 0)), ccy),
+      -toMajor(Math.abs(days.reduce((a, d) => a + d.declined_fee_minor, 0)), ccy),
+      -toMajor(Math.abs(days.reduce((a, d) => a + d.refunds_minor, 0)), ccy),
+      -toMajor(Math.abs(days.reduce((a, d) => a + d.refund_fee_minor, 0)), ccy),
+      -toMajor(Math.abs(days.reduce((a, d) => a + d.chargebacks_minor, 0)), ccy),
+      -toMajor(Math.abs(days.reduce((a, d) => a + d.chargeback_fee_minor, 0)), ccy),
+      -toMajor(Math.abs(days.reduce((a, d) => a + d.reserve_held_minor, 0)), ccy),
+      toMajor(Math.abs(days.reduce((a, d) => a + d.reserve_released_minor, 0)), ccy),
+      toMajor(days.reduce((a, d) => a + d.net_minor, 0), ccy),
+      -toMajor(Math.abs(days.reduce((a, d) => a + d.settlement_fee_minor, 0)), ccy),
+      toMajor(days.reduce((a, d) => a + d.payout_minor, 0), ccy),
+    ],
+  ]
+
   const exportCSV = () =>
     view === 'statement'
       ? downloadCSV(`${base}.csv`, statementRows())
+      : view === 'daily'
+        ? downloadCSV(`${base}-daily.csv`, dayRows())
       : downloadCSV(`${base}-transactions.csv`, lineRows())
   const exportExcel = () =>
     view === 'statement'
       ? downloadExcel(`${base}.xls`, 'Statement', statementRows())
+      : view === 'daily'
+        ? downloadExcel(`${base}-daily.xls`, 'Daily', dayRows())
       : downloadExcel(`${base}-transactions.xls`, 'Transactions', lineRows())
 
-  const exporting = view === 'lines' && lines.loading
+  const exporting = view !== 'statement' && lines.loading
 
   return (
     <div className="stack">
@@ -164,11 +407,17 @@ export default function SettlementDetailPage() {
               {s.merchant_name} · <span className="ccy-tag">{ccy}</span> · {fmtInt(s.items_count)} items
             </div>
           </div>
-          {isAdmin && s.state === 'generated' && (
+          {isAdmin && (s.state === 'generated' || s.state === 'completed') && (
             <div className="head-actions">
-              <button className="btn success" onClick={() => void markCompleted()} disabled={completing}>
-                {completing ? 'Posting payout…' : '✓ Mark completed'}
-              </button>
+              {s.state === 'generated' ? (
+                <button className="btn" onClick={() => void markCompleted()} disabled={completing}>
+                  {completing ? 'Posting payout…' : '✓ Mark completed'}
+                </button>
+              ) : (
+                <button className="btn success" disabled>
+                  ✓ Completed
+                </button>
+              )}
             </div>
           )}
         </div>
@@ -177,7 +426,11 @@ export default function SettlementDetailPage() {
       <div className="statement-bar" data-print="hide">
         <div className="seg">
           <button className={view === 'statement' ? 'on' : ''} onClick={() => setView('statement')}>
-            Statement
+            Whole settlement
+          </button>
+          <button className={view === 'daily' ? 'on' : ''} onClick={() => setView('daily')}>
+            Day-wise
+            <span className="c">{lines.data ? fmtInt(days.length) : '·'}</span>
           </button>
           <button className={view === 'lines' ? 'on' : ''} onClick={() => setView('lines')}>
             Per-transaction
@@ -188,14 +441,16 @@ export default function SettlementDetailPage() {
           <span className="export-label">Export</span>
           <button className="export-btn" onClick={exportCSV} disabled={exporting}>CSV</button>
           <button className="export-btn" onClick={exportExcel} disabled={exporting}>Excel</button>
-          {view === 'statement' && (
+          {view !== 'lines' && (
             <button className="export-btn" onClick={printToPDF}>PDF</button>
           )}
         </div>
       </div>
 
       {view === 'statement' ? (
-        <StatementView s={s} />
+        <StatementView s={s} counts={counts} />
+      ) : view === 'daily' ? (
+        <DailyView days={days} loading={lines.loading} s={s} />
       ) : (
         <LinesView items={items} loading={lines.loading} ccy={ccy} />
       )}
@@ -203,9 +458,275 @@ export default function SettlementDetailPage() {
   )
 }
 
-function StatementView({ s }: { s: SettlementDetail }) {
+function DailyView({ days, loading, s }: { days: SettlementDayRow[]; loading: boolean; s: SettlementDetail }) {
+  const ccy = s.currency
+  const fs = s.fee_schedule
+  const storageKey = `tw:daily-payouts:${s.settlement_uuid}`
+  const [selectedDate, setSelectedDate] = useState('')
+  const [paidDays, setPaidDays] = useState<Set<string>>(() => {
+    try {
+      return new Set(JSON.parse(localStorage.getItem(storageKey) || '[]'))
+    } catch {
+      return new Set()
+    }
+  })
+
+  useEffect(() => {
+    try {
+      setPaidDays(new Set(JSON.parse(localStorage.getItem(storageKey) || '[]')))
+    } catch {
+      setPaidDays(new Set())
+    }
+  }, [storageKey])
+
+  useEffect(() => {
+    if (days.length > 0 && !days.some((d) => d.date === selectedDate)) {
+      setSelectedDate(days[0].date)
+    }
+  }, [days, selectedDate])
+
+  useEffect(() => {
+    localStorage.setItem(storageKey, JSON.stringify(Array.from(paidDays)))
+  }, [storageKey, paidDays])
+
+  if (loading) return <LoadingBlock label="Loading day-wise report…" />
+  if (days.length === 0)
+    return (
+      <div className="card" style={{ padding: 32, textAlign: 'center', color: 'var(--ink-2)' }}>
+        No day-wise rows in this settlement.
+      </div>
+    )
+
+  const sum = (k: keyof SettlementDayRow) =>
+    days.reduce((a, d) => a + (typeof d[k] === 'number' ? (d[k] as number) : 0), 0)
+  const subtotal = sum('net_minor')
+  const payout = sum('payout_minor')
+  const selected = days.find((d) => d.date === selectedDate) ?? days[0]
+  const selectedPaid = paidDays.has(selected.date)
+  const paidCount = days.filter((d) => paidDays.has(d.date)).length
+  const togglePaid = () => {
+    setPaidDays((prev) => {
+      const next = new Set(prev)
+      if (next.has(selected.date)) next.delete(selected.date)
+      else next.add(selected.date)
+      return next
+    })
+  }
+
+  return (
+    <div className="stack">
+      <div className="grid grid-cards">
+        <div className="card stat-card">
+          <div className="label">Processing days</div>
+          <div className="value">{fmtInt(days.length)}</div>
+          <div className="dim small">{fmtDate(days[0].date)} → {fmtDate(days[days.length - 1].date)}</div>
+        </div>
+        <div className="card stat-card">
+          <div className="label"><span className="ccy-tag">{ccy}</span> Daily subtotal</div>
+          <div className="value">{fmtMoney(subtotal, ccy)}</div>
+          <div className="dim small">before settlement fee</div>
+        </div>
+        <div className="card stat-card">
+          <div className="label">Settlement fee</div>
+          <div className="value money neg">−{fmtMoney(Math.abs(s.breakdown.settlement_fee_minor), ccy)}</div>
+          <div className="dim small">applied once to whole settlement</div>
+        </div>
+        <div className="card stat-card">
+          <div className="label">Day payouts marked</div>
+          <div className="value">{fmtInt(paidCount)} / {fmtInt(days.length)}</div>
+          <div className="dim small">total daily payout {fmtMoney(payout, ccy)}</div>
+        </div>
+      </div>
+
+      <div className="daily-report-layout">
+        <div className="card daily-day-list" data-print="hide">
+          <div className="card-title">
+            <span>Daily payout days</span>
+            <span className="dim small">{fmtInt(days.length)} days</span>
+          </div>
+          <div className="daily-day-options">
+            {days.map((d) => {
+              const paid = paidDays.has(d.date)
+              return (
+                <button
+                  key={d.date}
+                  className={d.date === selected.date ? 'daily-day-option on' : 'daily-day-option'}
+                  onClick={() => setSelectedDate(d.date)}
+                >
+                  <span>
+                    <b>{fmtDate(d.date)}</b>
+                    <small>{fmtInt(d.payments)} paid · {fmtInt(d.refunds)} refunds</small>
+                  </span>
+                  <span className="daily-day-amount">
+                    {fmtMoney(d.payout_minor, ccy)}
+                    {paid && <span className="chip green">Paid</span>}
+                  </span>
+                </button>
+              )
+            })}
+          </div>
+        </div>
+
+        <DailyStatement
+          day={selected}
+          ccy={ccy}
+          feeSchedule={fs}
+          merchantName={s.merchant_name}
+          windowStart={s.window_start}
+          windowEnd={s.window_end}
+          paid={selectedPaid}
+          onTogglePaid={togglePaid}
+        />
+      </div>
+    </div>
+  )
+}
+
+function DailyStatement({
+  day,
+  ccy,
+  feeSchedule,
+  merchantName,
+  windowStart,
+  windowEnd,
+  paid,
+  onTogglePaid,
+}: {
+  day: SettlementDayRow
+  ccy: string
+  feeSchedule: SettlementDetail['fee_schedule']
+  merchantName: string
+  windowStart: string
+  windowEnd: string
+  paid: boolean
+  onTogglePaid: () => void
+}) {
+  const settlementFeeDetail = basisLabel(percentBasis(feeSchedule?.settlement_fee_bps))
+
+  return (
+    <div className="card statement daily-statement">
+      <div className="statement-head">
+        <div>
+          <div className="kicker">Day-wise settlement report</div>
+          <div className="m-name">{merchantName}</div>
+          <div className="win num">
+            Processing date {fmtDate(day.date)} · Currency {ccy}
+          </div>
+          <div className="win num">
+            Parent window {fmtDate(windowStart)} → {fmtDate(windowEnd)}
+          </div>
+        </div>
+        <div className="daily-approve-box">
+          <div className="kicker">Counts</div>
+          <div className="small num" style={{ marginTop: 4, lineHeight: 1.7 }}>
+            Paid <b>{fmtInt(day.payments)}</b> · Declined <b>{fmtInt(day.declines)}</b>
+            <br />
+            Refunds <b>{fmtInt(day.refunds)}</b> · Chargebacks <b>{fmtInt(day.chargebacks)}</b>
+          </div>
+          <div className="daily-payout">
+            <span>Day net payout</span>
+            <b>{fmtMoney(day.payout_minor, ccy)}</b>
+          </div>
+          <button className={paid ? 'btn sm success' : 'btn sm'} onClick={onTogglePaid} data-print="hide">
+            {paid ? 'Paid for day' : '✓ Mark day paid'}
+          </button>
+        </div>
+      </div>
+
+      <table>
+        <tbody>
+          <tr className="section-gap">
+            <td className="row-label" style={{ fontWeight: 600, color: 'var(--ink)' }}>
+              <span className="op" />Gross captured
+            </td>
+            <td className="money" style={{ fontWeight: 600 }}>{fmtMoney(day.gross_minor, ccy)}</td>
+          </tr>
+          <Row
+            label="MDR"
+            op="−"
+            minor={-Math.abs(day.mdr_minor)}
+            currency={ccy}
+            detail={basisLabel(percentBasis(feeSchedule?.mdr_bps))}
+          />
+          <Row
+            label="Approved transaction fees"
+            op="−"
+            minor={-Math.abs(day.approved_fee_minor)}
+            currency={ccy}
+            detail={basisLabel(fixedBasis(feeSchedule?.approved_txn_fee_minor, ccy))}
+          />
+          <Row
+            label="Declined transaction fees"
+            op="−"
+            minor={-Math.abs(day.declined_fee_minor)}
+            currency={ccy}
+            detail={basisLabel(fixedBasis(feeSchedule?.declined_txn_fee_minor, ccy))}
+            dimZero
+          />
+          <Row label="Refunds" op="−" minor={-Math.abs(day.refunds_minor)} currency={ccy} dimZero />
+          <Row
+            label="Refund fees"
+            op="−"
+            minor={-Math.abs(day.refund_fee_minor)}
+            currency={ccy}
+            detail={basisLabel(fixedBasis(feeSchedule?.refund_fee_minor, ccy))}
+            dimZero
+          />
+          <Row label="Chargebacks" op="−" minor={-Math.abs(day.chargebacks_minor)} currency={ccy} dimZero />
+          <Row
+            label="Chargeback fees"
+            op="−"
+            minor={-Math.abs(day.chargeback_fee_minor)}
+            currency={ccy}
+            detail={basisLabel(fixedBasis(feeSchedule?.chargeback_fee_minor, ccy))}
+            dimZero
+          />
+          <Row
+            label="Reserve held"
+            op="−"
+            minor={-Math.abs(day.reserve_held_minor)}
+            currency={ccy}
+            detail={basisLabel(percentBasis(feeSchedule?.reserve_hold_bps))}
+            dimZero
+          />
+          <Row label="Reserve released" op="+" minor={Math.abs(day.reserve_released_minor)} currency={ccy} dimZero />
+          <Row label="Adjustments" op="±" minor={day.adjustments_minor} currency={ccy} dimZero />
+          <Row label="Subtotal" op="=" minor={day.net_minor} currency={ccy} className="sub" />
+          <Row
+            label="Allocated settlement fee"
+            op="−"
+            minor={-Math.abs(day.settlement_fee_minor)}
+            currency={ccy}
+            detail={settlementFeeDetail}
+          />
+          <tr className="total">
+            <td className="row-label">
+              <span className="op">=</span>DAY NET PAYOUT
+            </td>
+            <td className={day.payout_minor < 0 ? 'money neg' : 'money'}>
+              {fmtMoney(day.payout_minor, ccy)}
+            </td>
+          </tr>
+        </tbody>
+      </table>
+
+      <div className="statement-foot">
+        <div className="usdc">
+          <span>Day payout status</span>
+          <b>{paid ? 'Paid' : 'Generated'}</b>
+        </div>
+        <div className="dim">
+          Statement covers {fmtInt(day.txns)} settled items for {fmtDate(day.date)}.
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function StatementView({ s, counts }: { s: SettlementDetail; counts: SettlementCounts }) {
   const b = s.breakdown
   const ccy = s.currency
+  const fs = s.fee_schedule
   return (
     <div className="card statement">
       <div className="statement-head">
@@ -219,9 +740,9 @@ function StatementView({ s }: { s: SettlementDetail }) {
         <div style={{ textAlign: 'right' }}>
           <div className="kicker">Counts</div>
           <div className="small num" style={{ marginTop: 4, lineHeight: 1.7 }}>
-            Paid <b>{fmtInt(s.counts.paid)}</b> · Declined <b>{fmtInt(s.counts.declined)}</b>
+            Paid <b>{fmtInt(counts.paid)}</b> · Declined <b>{fmtInt(counts.declined)}</b>
             <br />
-            Refunds <b>{fmtInt(s.counts.refunds)}</b> · Chargebacks <b>{fmtInt(s.counts.chargebacks)}</b>
+            Refunds <b>{fmtInt(counts.refunds)}</b> · Chargebacks <b>{fmtInt(counts.chargebacks)}</b>
           </div>
         </div>
       </div>
@@ -234,18 +755,62 @@ function StatementView({ s }: { s: SettlementDetail }) {
             </td>
             <td className="money" style={{ fontWeight: 600 }}>{fmtMoney(b.gross_captured_minor, ccy)}</td>
           </tr>
-          <Row label="MDR" op="−" minor={-Math.abs(b.mdr_minor)} currency={ccy} />
-          <Row label="Approved transaction fees" op="−" minor={-Math.abs(b.approved_txn_fees_minor)} currency={ccy} />
-          <Row label="Declined transaction fees" op="−" minor={-Math.abs(b.declined_txn_fees_minor)} currency={ccy} />
+          <Row
+            label="MDR"
+            op="−"
+            minor={-Math.abs(b.mdr_minor)}
+            currency={ccy}
+            detail={basisLabel(percentBasis(fs?.mdr_bps))}
+          />
+          <Row
+            label="Approved transaction fees"
+            op="−"
+            minor={-Math.abs(b.approved_txn_fees_minor)}
+            currency={ccy}
+            detail={basisLabel(fixedBasis(fs?.approved_txn_fee_minor, ccy))}
+          />
+          <Row
+            label="Declined transaction fees"
+            op="−"
+            minor={-Math.abs(b.declined_txn_fees_minor)}
+            currency={ccy}
+            detail={basisLabel(fixedBasis(fs?.declined_txn_fee_minor, ccy))}
+          />
           <Row label="Refunds" op="−" minor={-Math.abs(b.refunds_minor)} currency={ccy} dimZero />
-          <Row label="Refund fees" op="−" minor={-Math.abs(b.refund_fees_minor)} currency={ccy} dimZero />
+          <Row
+            label="Refund fees"
+            op="−"
+            minor={-Math.abs(b.refund_fees_minor)}
+            currency={ccy}
+            detail={basisLabel(fixedBasis(fs?.refund_fee_minor, ccy))}
+            dimZero
+          />
           <Row label="Chargebacks" op="−" minor={-Math.abs(b.chargebacks_minor)} currency={ccy} dimZero />
-          <Row label="Chargeback fees" op="−" minor={-Math.abs(b.chargeback_fees_minor)} currency={ccy} dimZero />
-          <Row label="Reserve held" op="−" minor={-Math.abs(b.reserve_held_minor)} currency={ccy} />
+          <Row
+            label="Chargeback fees"
+            op="−"
+            minor={-Math.abs(b.chargeback_fees_minor)}
+            currency={ccy}
+            detail={basisLabel(fixedBasis(fs?.chargeback_fee_minor, ccy))}
+            dimZero
+          />
+          <Row
+            label="Reserve held"
+            op="−"
+            minor={-Math.abs(b.reserve_held_minor)}
+            currency={ccy}
+            detail={basisLabel(percentBasis(fs?.reserve_hold_bps))}
+          />
           <Row label="Reserve released" op="+" minor={Math.abs(b.reserve_released_minor)} currency={ccy} dimZero />
           <Row label="Adjustments" op="±" minor={b.adjustments_minor} currency={ccy} dimZero />
           <Row label="Subtotal" op="=" minor={b.subtotal_minor} currency={ccy} className="sub" />
-          <Row label="Settlement fee" op="−" minor={-Math.abs(b.settlement_fee_minor)} currency={ccy} />
+          <Row
+            label="Settlement fee"
+            op="−"
+            minor={-Math.abs(b.settlement_fee_minor)}
+            currency={ccy}
+            detail={basisLabel(percentBasis(fs?.settlement_fee_bps))}
+          />
           <tr className="total">
             <td className="row-label">
               <span className="op">=</span>NET PAYOUT
@@ -265,8 +830,8 @@ function StatementView({ s }: { s: SettlementDetail }) {
           <b>{Number(s.usdc.amount).toLocaleString('en-US', { minimumFractionDigits: 2 })} USDC</b>
         </div>
         <div className="dim">
-          Statement covers {fmtInt(s.items_count)} settled items · counts: {fmtInt(s.counts.paid)} paid,{' '}
-          {fmtInt(s.counts.declined)} declined, {fmtInt(s.counts.refunds)} refunds
+          Statement covers {fmtInt(s.items_count)} settled items · counts: {fmtInt(counts.paid)} paid,{' '}
+          {fmtInt(counts.declined)} declined, {fmtInt(counts.refunds)} refunds
         </div>
       </div>
     </div>

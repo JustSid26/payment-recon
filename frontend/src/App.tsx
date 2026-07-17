@@ -11,9 +11,11 @@ import TransactionDetailPage from './pages/TransactionDetail'
 import Settlements from './pages/Settlements'
 import SettlementDetailPage from './pages/SettlementDetail'
 import Ledger from './pages/Ledger'
+import LedgerMerchant from './pages/LedgerMerchant'
 import LedgerAccountPage from './pages/LedgerAccount'
 import Integrity from './pages/Integrity'
 import Reserve from './pages/Reserve'
+import RollingReserve from './pages/RollingReserve'
 import Upload from './pages/Upload'
 
 function RequireAuth({ children }: { children: React.ReactElement }) {
@@ -73,7 +75,24 @@ export default function App() {
           <Route path="/transactions/:uuid" element={<TransactionDetailPage />} />
           <Route path="/settlements" element={<Settlements />} />
           <Route path="/settlements/:uuid" element={<SettlementDetailPage />} />
+          <Route
+            path="/rolling-reserve"
+            element={
+              <AdminOnly>
+                <RollingReserve />
+              </AdminOnly>
+            }
+          />
+          <Route
+            path="/rolling-reserve/:uuid"
+            element={
+              <AdminOnly>
+                <RollingReserve />
+              </AdminOnly>
+            }
+          />
           <Route path="/ledger" element={<Ledger />} />
+          <Route path="/ledger/merchants/:uuid" element={<LedgerMerchant />} />
           <Route path="/ledger/accounts/:id" element={<LedgerAccountPage />} />
           <Route
             path="/integrity"

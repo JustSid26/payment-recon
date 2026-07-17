@@ -1,6 +1,9 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
+import json
+import time
+import urllib.request
 
 from fastapi import Depends, FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
@@ -21,6 +24,48 @@ app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"],
 from .admin import router as admin_router  # noqa: E402
 app.include_router(admin_router)
 
+_FX_FALLBACK_TO_USD = {
+    "USD": 1.0,
+    "EUR": 1.0850,
+    "AUD": 0.6650,
+    "CAD": 0.7350,
+    "GBP": 1.2700,
+    "JPY": 0.0069,
+}
+_FX_CACHE: dict = {"ts": 0.0, "payload": None}
+
+
+def _fx_rates_to_usd() -> dict:
+    """Best-effort live FX for display only; falls back to demo rates offline."""
+    now = time.time()
+    if _FX_CACHE["payload"] and now - _FX_CACHE["ts"] < 60 * 30:
+        return _FX_CACHE["payload"]
+    try:
+        with urllib.request.urlopen("https://open.er-api.com/v6/latest/USD", timeout=2) as resp:
+            data = json.loads(resp.read().decode("utf-8"))
+        rates = data.get("rates") or {}
+        payload = {
+            "base": "USD",
+            "source": "open.er-api.com",
+            "as_of": data.get("time_last_update_utc") or data.get("time_last_update_unix"),
+            "fallback": False,
+            "rates": {
+                c: (1.0 if c == "USD" else round(1 / float(rates[c]), 8))
+                for c in rates
+                if c == "USD" or rates.get(c)
+            },
+        }
+    except Exception:
+        payload = {
+            "base": "USD",
+            "source": "demo-fallback",
+            "as_of": datetime.now(timezone.utc).isoformat(),
+            "fallback": True,
+            "rates": _FX_FALLBACK_TO_USD,
+        }
+    _FX_CACHE.update({"ts": now, "payload": payload})
+    return payload
+
 
 def err(status: int, code: str, message: str):
     raise HTTPException(status, detail={"error": {"code": code, "message": message}})
@@ -37,6 +82,23 @@ def scope_merchant_id(user: dict, requested_uuid: str | None, cur) -> int | None
             err(404, "not_found", "merchant not found")
         return row["id"]
     return None
+
+
+@app.get("/api/fx-rates")
+def fx_rates(currencies: str | None = None, user: dict = Depends(current_user)):
+    payload = _fx_rates_to_usd()
+    requested = [c.strip().upper() for c in currencies.split(",")] if currencies else []
+    if requested:
+        rates = {c: payload["rates"].get(c, _FX_FALLBACK_TO_USD.get(c, 1.0)) for c in requested}
+    else:
+        rates = payload["rates"]
+    return {
+        "base": payload["base"],
+        "source": payload["source"],
+        "as_of": payload["as_of"],
+        "fallback": payload["fallback"],
+        "rates": rates,
+    }
 
 
 # ---------------------------------------------------------------- auth
@@ -196,11 +258,23 @@ def _merchant_item(cur, m) -> dict:
     bal: dict[str, dict] = {}
     for r in cur.fetchall():
         c = bal.setdefault(r["currency"], {"currency": r["currency"], "payable_minor": 0,
-                                           "reserve_minor": 0, "in_settlement_minor": 0})
+                                           "reserve_minor": 0, "in_settlement_minor": 0,
+                                           "paid_minor": 0})
         key = {"merchant_payable": "payable_minor", "merchant_reserve": "reserve_minor",
                "settlement_payable": "in_settlement_minor"}.get(r["account_type"])
         if key:
             c[key] = int(r["balance_minor"])
+
+    cur.execute("""
+        SELECT currency, SUM(net_payout_minor) AS total
+          FROM settlements WHERE merchant_id=%s AND state='completed'
+         GROUP BY currency""", (m["id"],))
+    for r in cur.fetchall():
+        c = bal.setdefault(r["currency"], {"currency": r["currency"], "payable_minor": 0,
+                                           "reserve_minor": 0, "in_settlement_minor": 0,
+                                           "paid_minor": 0})
+        c["paid_minor"] = int(r["total"] or 0)
+
     cur.execute("""
         SELECT currency, SUM(captured_minor) AS s, COUNT(*) AS n,
                COUNT(*) FILTER (WHERE ledger_posted = false) AS q FROM transactions
@@ -226,6 +300,29 @@ def merchants(user: dict = Depends(current_user)):
         else:
             cur.execute("SELECT * FROM merchants ORDER BY name")
         return {"items": [_merchant_item(cur, m) for m in cur.fetchall()]}
+
+
+class MerchantRenameBody(BaseModel):
+    name: str
+
+
+@app.patch("/api/merchants/{muuid}")
+def rename_merchant(muuid: str, body: MerchantRenameBody, user: dict = Depends(require_admin)):
+    """Rename a merchant (display name only; member_id and ledger are untouched)."""
+    name = (body.name or "").strip()
+    if not name:
+        err(400, "invalid_name", "name cannot be empty")
+    if len(name) > 200:
+        err(400, "invalid_name", "name is too long")
+    with get_pool().connection() as conn:
+        cur = conn.cursor()
+        cur.execute("UPDATE merchants SET name=%s WHERE merchant_uuid=%s RETURNING name",
+                    (name, muuid))
+        row = cur.fetchone()
+        if row is None:
+            err(404, "not_found", "merchant not found")
+        conn.commit()
+        return {"ok": True, "merchant_uuid": muuid, "name": row["name"]}
 
 
 @app.get("/api/merchants/unconfigured")
@@ -419,6 +516,151 @@ def reserve_statement(muuid: str, currency: str = Query(...),
                 "current_reserve_minor": int(acct["balance_minor"])}
 
 
+def _merchant_currencies(cur, merchant_id: int) -> list[str]:
+    cur.execute("SELECT DISTINCT currency FROM transactions WHERE merchant_id=%s ORDER BY 1",
+                (merchant_id,))
+    return [r["currency"] for r in cur.fetchall()]
+
+
+@app.get("/api/merchants/{muuid}/daily-settlement")
+def daily_settlement(muuid: str, currency: str | None = None,
+                     date_from: str | None = None, date_to: str | None = None,
+                     user: dict = Depends(current_user)):
+    """Per processing-day rollup for a merchant+currency: volume, fees, net payable
+    and whether that day's activity has been settled (paid) or is still owed.
+    Answers 'what's payable and how much is still remaining to be settled'."""
+    with get_pool().connection() as conn:
+        cur = conn.cursor()
+        if user["role"] == "merchant":
+            muuid = user["merchant_uuid"]
+        cur.execute("SELECT id FROM merchants WHERE merchant_uuid=%s", (muuid,))
+        m = cur.fetchone()
+        if m is None:
+            err(404, "not_found", "merchant not found")
+        mid = m["id"]
+        ccys = _merchant_currencies(cur, mid)
+        ccy = (currency or (ccys[0] if ccys else "EUR")).upper()
+
+        rng, p = "", {"mid": mid, "ccy": ccy}
+        if date_from:
+            rng += " AND occurred_at >= %(df)s"; p["df"] = date_from
+        if date_to:
+            rng += " AND occurred_at < %(dt)s::date + 1"; p["dt"] = date_to
+
+        # 1. counts + gross captured, per day
+        cur.execute(f"""
+            SELECT occurred_at::date AS d,
+                   COUNT(*) FILTER (WHERE status IN ('captured','refunded','partially_refunded')) AS approved,
+                   COUNT(*) FILTER (WHERE status='auth_failed') AS declined,
+                   COALESCE(SUM(captured_minor),0) AS gross
+              FROM transactions
+             WHERE merchant_id=%(mid)s AND currency=%(ccy)s{rng}
+             GROUP BY 1""", p)
+        days: dict[str, dict] = {}
+        for r in cur.fetchall():
+            d = str(r["d"])
+            days[d] = {"date": d, "approved_count": int(r["approved"]),
+                       "declined_count": int(r["declined"]),
+                       "volume": int(r["approved"]) + int(r["declined"]),
+                       "gross_captured_minor": int(r["gross"]), "fees_minor": 0,
+                       "reserve_minor": 0, "net_payable_minor": 0,
+                       "status": "pending", "settlement_uuid": None}
+
+        # 2. per-txn fees per day (settlement fee is not linked to a txn → excluded)
+        cur.execute(f"""
+            SELECT t.occurred_at::date AS d, COALESCE(SUM(f.fee_minor),0) AS fees
+              FROM fees f JOIN transactions t ON t.id=f.transaction_id
+             WHERE t.merchant_id=%(mid)s AND t.currency=%(ccy)s{rng.replace('occurred_at','t.occurred_at')}
+             GROUP BY 1""", p)
+        for r in cur.fetchall():
+            if str(r["d"]) in days:
+                days[str(r["d"])]["fees_minor"] = int(r["fees"])
+
+        # 3. reserve delta (held − released) per day, from ledger
+        cur.execute(f"""
+            SELECT e.occurred_at::date AS d,
+                   SUM(CASE WHEN le.direction='credit' THEN le.amount_minor
+                            ELSE -le.amount_minor END) AS delta
+              FROM ledger_entries le
+              JOIN ledger_events e ON e.id=le.event_id
+              JOIN accounts a ON a.id=le.account_id AND a.account_type='merchant_reserve'
+             WHERE e.merchant_id=%(mid)s AND e.currency=%(ccy)s AND e.source_txn_id IS NOT NULL
+               {rng.replace('occurred_at','e.occurred_at')}
+             GROUP BY 1""", p)
+        for r in cur.fetchall():
+            if str(r["d"]) in days:
+                days[str(r["d"])]["reserve_minor"] = int(r["delta"])
+
+        # 4. settlement linkage per day → status
+        cur.execute(f"""
+            SELECT e.occurred_at::date AS d,
+                   COUNT(*) AS n,
+                   COUNT(si.event_id) AS n_settled,
+                   COUNT(*) FILTER (WHERE s.state='completed') AS n_completed,
+                   COUNT(*) FILTER (WHERE s.state='generated') AS n_generated,
+                   (ARRAY_AGG(s.settlement_uuid) FILTER (WHERE s.settlement_uuid IS NOT NULL))[1] AS suuid
+              FROM ledger_events e
+              LEFT JOIN settlement_items si ON si.event_id=e.id
+              LEFT JOIN settlements s ON s.id=si.settlement_id
+             WHERE e.merchant_id=%(mid)s AND e.currency=%(ccy)s AND e.source_txn_id IS NOT NULL
+               AND e.event_type = ANY(%(types)s){rng.replace('occurred_at','e.occurred_at')}
+             GROUP BY 1""", {**p, "types": list(settle_mod.CANDIDATE_TYPES)})
+        for r in cur.fetchall():
+            d = str(r["d"])
+            if d not in days:
+                continue
+            n, n_settled = int(r["n"]), int(r["n_settled"])
+            n_completed, n_generated = int(r["n_completed"]), int(r["n_generated"])
+            if n_settled == 0:
+                status = "pending"
+            elif n_settled < n:
+                status = "partial"
+            elif n_completed == n:
+                status = "paid"
+            elif n_generated > 0 and n_completed == 0:
+                status = "in_settlement"
+            else:
+                status = "partial"
+            days[d]["status"] = status
+            days[d]["settlement_uuid"] = str(r["suuid"]) if r["suuid"] else None
+
+        rows = sorted(days.values(), key=lambda x: x["date"])
+        for row in rows:
+            row["net_payable_minor"] = (row["gross_captured_minor"] - row["fees_minor"]
+                                        - row["reserve_minor"])
+        total_net = sum(r["net_payable_minor"] for r in rows)
+        paid_net = sum(r["net_payable_minor"] for r in rows if r["status"] == "paid")
+        totals = {
+            "volume": sum(r["volume"] for r in rows),
+            "approved": sum(r["approved_count"] for r in rows),
+            "declined": sum(r["declined_count"] for r in rows),
+            "gross_captured_minor": sum(r["gross_captured_minor"] for r in rows),
+            "fees_minor": sum(r["fees_minor"] for r in rows),
+            "net_payable_minor": total_net,
+            "paid_net_minor": paid_net,
+            "remaining_net_minor": total_net - paid_net,
+        }
+        return {"currency": ccy, "currencies": ccys, "days": rows, "totals": totals}
+
+
+@app.get("/api/merchants/{muuid}/daily-settlement/{day}/transactions")
+def daily_settlement_transactions(muuid: str, day: str, currency: str | None = None,
+                                  user: dict = Depends(current_user)):
+    """Per-transaction charge breakdown for one processing day (drill-down)."""
+    with get_pool().connection() as conn:
+        cur = conn.cursor()
+        if user["role"] == "merchant":
+            muuid = user["merchant_uuid"]
+        cur.execute("SELECT id FROM merchants WHERE merchant_uuid=%s", (muuid,))
+        m = cur.fetchone()
+        if m is None:
+            err(404, "not_found", "merchant not found")
+        ccys = _merchant_currencies(cur, m["id"])
+        ccy = (currency or (ccys[0] if ccys else "EUR")).upper()
+        return {"items": settle_mod.day_line_items(conn, m["id"], ccy, day),
+                "date": day, "currency": ccy}
+
+
 # ---------------------------------------------------------------- transactions
 @app.get("/api/transactions")
 def transactions(user: dict = Depends(current_user), merchant_uuid: str | None = None,
@@ -555,6 +797,23 @@ class GenerateBody(BaseModel):
     window_end: str
 
 
+def _window_start(s: str) -> datetime:
+    dt = datetime.fromisoformat(s)
+    return dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
+
+
+def _window_end(s: str) -> datetime:
+    """Parse a window end. A date-only value ("2026-07-03") is INCLUSIVE of the
+    whole day — otherwise a bare date lands at 00:00 and silently drops every
+    transaction that occurred that day."""
+    dt = datetime.fromisoformat(s)
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    if "T" not in s and ":" not in s:            # date-only → end of that day
+        dt = dt.replace(hour=23, minute=59, second=59, microsecond=999999)
+    return dt
+
+
 @app.post("/api/settlements/generate")
 def generate_settlement(body: GenerateBody, user: dict = Depends(require_admin)):
     with get_pool().connection() as conn:
@@ -563,8 +822,8 @@ def generate_settlement(body: GenerateBody, user: dict = Depends(require_admin))
         m = cur.fetchone()
         if m is None:
             err(404, "not_found", "merchant not found")
-        ws = datetime.fromisoformat(body.window_start).replace(tzinfo=timezone.utc)
-        we = datetime.fromisoformat(body.window_end).replace(tzinfo=timezone.utc)
+        ws = _window_start(body.window_start)
+        we = _window_end(body.window_end)
         res = settle_mod.generate(conn, merchant_id=m["id"], currency=body.currency.upper(),
                                   window_start=ws, window_end=we,
                                   generated_by=user["sub"])
@@ -603,9 +862,8 @@ def run_settlement_cycle(body: CycleBody, user: dict = Depends(require_admin)):
     eligible merchant×currency. Idempotent per cutoff date."""
     cutoff = None
     if body.cutoff:
-        cutoff = datetime.fromisoformat(body.cutoff)
-        if cutoff.tzinfo is None:
-            cutoff = cutoff.replace(tzinfo=timezone.utc)
+        # a date-only cutoff means "settle everything through the end of that day"
+        cutoff = _window_end(body.cutoff)
     with get_pool().connection() as conn:
         summary = cycle_mod.run_cycle(conn, cutoff=cutoff, generated_by=user["sub"])
         conn.commit()
@@ -625,6 +883,9 @@ def settlement_detail(suuid: str, user: dict = Depends(current_user)):
         bd = dict(s["breakdown"] or {})
         counts = bd.pop("counts", {})
         items_count = bd.pop("items_count", 0)
+        cur.execute("SELECT * FROM fee_schedules WHERE merchant_id=%s", (s["merchant_id"],))
+        fs = cur.fetchone() or {}
+        fee_schedule = {k: v for k, v in fs.items() if k != "merchant_id"}
         # USDC display conversion (demo: USD 1:1; others indicative)
         rates = {"USD": "1.0000", "EUR": "1.0850", "AUD": "0.6650", "CAD": "0.7350",
                  "GBP": "1.2700", "JPY": "0.0069"}
@@ -636,6 +897,7 @@ def settlement_detail(suuid: str, user: dict = Depends(current_user)):
                 "currency": s["currency"], "window_start": s["window_start"].isoformat(),
                 "window_end": s["window_end"].isoformat(), "state": s["state"],
                 "counts": counts, "breakdown": bd,
+                "fee_schedule": fee_schedule,
                 "usdc": {"rate": rate, "amount": usdc_amount},
                 "items_count": items_count,
                 "net_payout_minor": int(s["net_payout_minor"])}
@@ -664,7 +926,7 @@ def ledger_accounts(user: dict = Depends(current_user), merchant_uuid: str | Non
             where.append("a.merchant_id=%(mid)s"); p["mid"] = mid
         cur.execute(f"""
             SELECT a.id, a.account_type, a.currency, b.balance_minor,
-                   m.merchant_uuid, m.name AS merchant_name
+                   m.merchant_uuid, m.name AS merchant_name, m.member_id
               FROM accounts a JOIN account_balances b ON b.account_id=a.id
               LEFT JOIN merchants m ON m.id=a.merchant_id
              WHERE {' AND '.join(where)}
@@ -677,34 +939,296 @@ def ledger_accounts(user: dict = Depends(current_user), merchant_uuid: str | Non
             label += f" ({r['currency']})"
             items.append({"account_id": r["id"], "account_type": r["account_type"],
                           "merchant_uuid": str(r["merchant_uuid"]) if r["merchant_uuid"] else None,
-                          "merchant_name": r["merchant_name"], "currency": r["currency"],
+                          "merchant_name": r["merchant_name"], "member_id": r["member_id"],
+                          "currency": r["currency"],
                           "balance_minor": int(r["balance_minor"]), "label": label})
         return {"items": items}
 
 
 @app.get("/api/ledger/accounts/{account_id}/entries")
 def account_entries(account_id: int, user: dict = Depends(current_user),
-                    page: int = 1, page_size: int = Query(50, le=200)):
+                    page: int = 1, page_size: int = Query(50, le=200),
+                    q: str | None = None,
+                    date_from: str | None = None, date_to: str | None = None):
     with get_pool().connection() as conn:
         cur = conn.cursor()
         cur.execute("SELECT merchant_id FROM accounts WHERE id=%s", (account_id,))
         a = cur.fetchone()
         if a is None or (user["role"] == "merchant" and a["merchant_id"] != user["merchant_id"]):
             err(404, "not_found", "account not found")
-        cur.execute("SELECT COUNT(*) AS n FROM ledger_entries WHERE account_id=%s",
-                    (account_id,))
+        where, p = ["le.account_id=%(aid)s"], {"aid": account_id}
+        if date_from:
+            where.append("e.occurred_at >= %(df)s"); p["df"] = date_from
+        if date_to:                                    # inclusive of the whole end day
+            where.append("e.occurred_at < %(dt)s::date + 1"); p["dt"] = date_to
+        if q and q.strip():                            # match event type or uuid
+            where.append("(e.event_type ILIKE %(q)s OR e.event_uuid::text ILIKE %(q)s)")
+            p["q"] = f"%{q.strip().replace(' ', '%')}%"
+        w = " AND ".join(where)
+        cur.execute(f"SELECT COUNT(*) AS n FROM ledger_entries le "
+                    f"JOIN ledger_events e ON e.id=le.event_id WHERE {w}", p)
         total = cur.fetchone()["n"]
-        cur.execute("""
-            SELECT le.entry_uuid, le.posted_at, le.direction, le.amount_minor,
+        p["lim"], p["off"] = page_size, (page - 1) * page_size
+        cur.execute(f"""
+            SELECT le.entry_uuid, le.posted_at, e.occurred_at, le.direction, le.amount_minor,
                    le.balance_after_minor, le.currency, e.event_type, e.event_uuid
               FROM ledger_entries le JOIN ledger_events e ON e.id=le.event_id
-             WHERE le.account_id=%s ORDER BY le.id DESC LIMIT %s OFFSET %s""",
-                    (account_id, page_size, (page - 1) * page_size))
+             WHERE {w} ORDER BY le.id DESC LIMIT %(lim)s OFFSET %(off)s""", p)
         items = [{"entry_uuid": str(r["entry_uuid"]), "posted_at": r["posted_at"].isoformat(),
+                  "occurred_at": r["occurred_at"].isoformat(),
                   "event_type": r["event_type"], "event_uuid": str(r["event_uuid"]),
                   "direction": r["direction"], "amount_minor": int(r["amount_minor"]),
                   "balance_after_minor": int(r["balance_after_minor"]),
                   "currency": r["currency"]} for r in cur.fetchall()]
+        return {"items": items, "total": int(total), "page": page, "page_size": page_size}
+
+
+# ---- per-merchant ledger view -------------------------------------------------
+def _merchant_balance_sums(cur, mid_filter_sql: str, p: dict) -> dict:
+    """merchant_id -> {currency -> {payable, reserve}} from account balances."""
+    cur.execute(f"""
+        SELECT a.merchant_id, a.account_type, a.currency, b.balance_minor
+          FROM accounts a JOIN account_balances b ON b.account_id=a.id
+         WHERE a.merchant_id IS NOT NULL {mid_filter_sql}""", p)
+    out: dict = {}
+    for r in cur.fetchall():
+        c = out.setdefault(r["merchant_id"], {}).setdefault(
+            r["currency"], {"currency": r["currency"], "payable_minor": 0, "reserve_minor": 0})
+        if r["account_type"] == "merchant_payable":
+            c["payable_minor"] = int(r["balance_minor"])
+        elif r["account_type"] == "merchant_reserve":
+            c["reserve_minor"] = int(r["balance_minor"])
+    return out
+
+
+def _merchant_paid_out(cur, mid_filter_sql: str, p: dict) -> dict:
+    cur.execute(f"""
+        SELECT merchant_id, currency, SUM(net_payout_minor) AS total
+          FROM settlements WHERE state='completed' {mid_filter_sql}
+         GROUP BY merchant_id, currency""", p)
+    out: dict = {}
+    for r in cur.fetchall():
+        out.setdefault(r["merchant_id"], []).append(
+            {"currency": r["currency"], "amount_minor": int(r["total"] or 0)})
+    return out
+
+
+def _unbalanced_merchant_ids(cur) -> set:
+    """Merchant ids whose stored account balance ≠ the signed sum of its entries.
+    Uses the same credit-normal account list as the global integrity check."""
+    cur.execute("""
+        SELECT DISTINCT a.merchant_id FROM account_balances b
+          JOIN accounts a ON a.id=b.account_id
+          LEFT JOIN (
+            SELECT le.account_id,
+                   SUM(CASE WHEN (a2.account_type IN ('merchant_payable','merchant_reserve',
+                          'settlement_payable','chargeback_suspense','gateway_revenue','tax_payable'))
+                            = (le.direction='credit')
+                        THEN le.amount_minor ELSE -le.amount_minor END) AS s
+              FROM ledger_entries le JOIN accounts a2 ON a2.id=le.account_id
+             GROUP BY le.account_id) e ON e.account_id=b.account_id
+         WHERE a.merchant_id IS NOT NULL AND b.balance_minor <> COALESCE(e.s, 0)""")
+    return {r["merchant_id"] for r in cur.fetchall()}
+
+
+@app.get("/api/ledger/merchants")
+def ledger_merchants(user: dict = Depends(current_user)):
+    """Ledger landing: one row per merchant (name, member id, payable, paid out,
+    balanced) plus the platform (non-merchant) accounts."""
+    with get_pool().connection() as conn:
+        cur = conn.cursor()
+        scope, p = "", {}
+        if user["role"] == "merchant":
+            scope = "AND m.id=%(mid)s"; p["mid"] = user["merchant_id"]
+        cur.execute(f"""SELECT m.id, m.merchant_uuid, m.name, m.member_id, m.status
+                          FROM merchants m
+                         WHERE EXISTS (SELECT 1 FROM accounts a WHERE a.merchant_id=m.id) {scope}
+                         ORDER BY m.name""", p)
+        rows = cur.fetchall()
+        mid_sql = "AND merchant_id=%(mid)s" if user["role"] == "merchant" else ""
+        bal = _merchant_balance_sums(cur, "AND a.merchant_id=%(mid)s" if p else "", p)
+        paid = _merchant_paid_out(cur, mid_sql, p)
+        unbalanced = _unbalanced_merchant_ids(cur)
+        merchants = []
+        for m in rows:
+            ccy = sorted(bal.get(m["id"], {}).values(), key=lambda x: x["currency"])
+            merchants.append({
+                "merchant_uuid": str(m["merchant_uuid"]), "name": m["name"],
+                "member_id": m["member_id"], "status": m["status"],
+                "payable": [{"currency": c["currency"], "minor": c["payable_minor"]} for c in ccy],
+                "reserve": [{"currency": c["currency"], "minor": c["reserve_minor"]} for c in ccy],
+                "paid": paid.get(m["id"], []),
+                "balanced": m["id"] not in unbalanced})
+        platform = []
+        if user["role"] != "merchant":
+            cur.execute("""SELECT a.id, a.account_type, a.currency, b.balance_minor
+                             FROM accounts a JOIN account_balances b ON b.account_id=a.id
+                            WHERE a.merchant_id IS NULL
+                            ORDER BY a.account_type, a.currency""")
+            platform = [{"account_id": r["id"], "account_type": r["account_type"],
+                         "currency": r["currency"], "balance_minor": int(r["balance_minor"])}
+                        for r in cur.fetchall()]
+        return {"merchants": merchants, "platform": platform}
+
+
+@app.get("/api/ledger/merchants/{muuid}")
+def ledger_merchant_detail(muuid: str, user: dict = Depends(current_user)):
+    with get_pool().connection() as conn:
+        cur = conn.cursor()
+        cur.execute("SELECT id, merchant_uuid, name, member_id, status FROM merchants "
+                    "WHERE merchant_uuid=%s", (muuid,))
+        m = cur.fetchone()
+        if m is None or (user["role"] == "merchant" and m["id"] != user["merchant_id"]):
+            err(404, "not_found", "merchant not found")
+        cur.execute("""SELECT a.id, a.account_type, a.currency, b.balance_minor
+                         FROM accounts a JOIN account_balances b ON b.account_id=a.id
+                        WHERE a.merchant_id=%s ORDER BY a.account_type, a.currency""", (m["id"],))
+        accounts = [{"account_id": r["id"], "account_type": r["account_type"],
+                     "currency": r["currency"], "balance_minor": int(r["balance_minor"])}
+                    for r in cur.fetchall()]
+        p = {"mid": m["id"]}
+        bal = _merchant_balance_sums(cur, "AND a.merchant_id=%(mid)s", p)
+        ccy = sorted(bal.get(m["id"], {}).values(), key=lambda x: x["currency"])
+        paid = _merchant_paid_out(cur, "AND merchant_id=%(mid)s", p).get(m["id"], [])
+        balanced = m["id"] not in _unbalanced_merchant_ids(cur)
+        return {"merchant_uuid": str(m["merchant_uuid"]), "name": m["name"],
+                "member_id": m["member_id"], "status": m["status"], "accounts": accounts,
+                "payable": [{"currency": c["currency"], "minor": c["payable_minor"]} for c in ccy],
+                "reserve": [{"currency": c["currency"], "minor": c["reserve_minor"]} for c in ccy],
+                "paid": paid, "balanced": balanced}
+
+
+@app.get("/api/ledger/merchants/{muuid}/entries")
+def merchant_ledger_entries(muuid: str, user: dict = Depends(current_user),
+                            page: int = 1, page_size: int = Query(50, le=200),
+                            q: str | None = None,
+                            date_from: str | None = None, date_to: str | None = None):
+    """Combined ledger statement across all of a merchant's accounts."""
+    with get_pool().connection() as conn:
+        cur = conn.cursor()
+        cur.execute("SELECT id FROM merchants WHERE merchant_uuid=%s", (muuid,))
+        m = cur.fetchone()
+        if m is None or (user["role"] == "merchant" and m["id"] != user["merchant_id"]):
+            err(404, "not_found", "merchant not found")
+        where, p = ["a.merchant_id=%(mid)s"], {"mid": m["id"]}
+        if date_from:
+            where.append("e.occurred_at >= %(df)s"); p["df"] = date_from
+        if date_to:
+            where.append("e.occurred_at < %(dt)s::date + 1"); p["dt"] = date_to
+        if q and q.strip():                            # match event type, account, or uuid
+            where.append("(e.event_type ILIKE %(q)s OR a.account_type ILIKE %(q)s "
+                         "OR e.event_uuid::text ILIKE %(q)s)")
+            p["q"] = f"%{q.strip().replace(' ', '%')}%"
+        w = " AND ".join(where)
+        cur.execute(f"""SELECT COUNT(*) AS n FROM ledger_entries le
+                          JOIN ledger_events e ON e.id=le.event_id
+                          JOIN accounts a ON a.id=le.account_id WHERE {w}""", p)
+        total = cur.fetchone()["n"]
+        p["lim"], p["off"] = page_size, (page - 1) * page_size
+        cur.execute(f"""
+            SELECT le.entry_uuid, le.posted_at, e.occurred_at, a.account_type, a.id AS account_id,
+                   le.direction, le.amount_minor, le.balance_after_minor, le.currency,
+                   e.event_type, e.event_uuid
+              FROM ledger_entries le
+              JOIN ledger_events e ON e.id=le.event_id
+              JOIN accounts a ON a.id=le.account_id
+             WHERE {w} ORDER BY le.id DESC LIMIT %(lim)s OFFSET %(off)s""", p)
+        items = [{"entry_uuid": str(r["entry_uuid"]), "posted_at": r["posted_at"].isoformat(),
+                  "occurred_at": r["occurred_at"].isoformat(), "account_type": r["account_type"],
+                  "account_id": r["account_id"], "event_type": r["event_type"],
+                  "event_uuid": str(r["event_uuid"]), "direction": r["direction"],
+                  "amount_minor": int(r["amount_minor"]),
+                  "balance_after_minor": int(r["balance_after_minor"]),
+                  "currency": r["currency"]} for r in cur.fetchall()]
+        return {"items": items, "total": int(total), "page": page, "page_size": page_size}
+
+
+@app.get("/api/ledger/merchants/{muuid}/statement")
+def merchant_ledger_statement(muuid: str, user: dict = Depends(current_user),
+                              page: int = 1, page_size: int = Query(50, le=5000),
+                              q: str | None = None,
+                              date_from: str | None = None, date_to: str | None = None):
+    """Merchant-facing daily ledger statement, one row per processed date/currency."""
+    with get_pool().connection() as conn:
+        cur = conn.cursor()
+        cur.execute("SELECT id FROM merchants WHERE merchant_uuid=%s", (muuid,))
+        m = cur.fetchone()
+        if m is None or (user["role"] == "merchant" and m["id"] != user["merchant_id"]):
+            err(404, "not_found", "merchant not found")
+        where, p = ["e.merchant_id=%(mid)s"], {"mid": m["id"]}
+        filters = []
+        if date_from:
+            filters.append("processed_date >= %(df)s::date"); p["df"] = date_from
+        if date_to:
+            filters.append("processed_date <= %(dt)s::date"); p["dt"] = date_to
+        if q and q.strip():
+            p["q"] = f"%{q.strip().replace(' ', '%')}%"
+            filters.append("(currency ILIKE %(q)s OR latest_event_uuid ILIKE %(q)s OR processed_date::text ILIKE %(q)s)")
+        filtered = " AND ".join(filters) if filters else "TRUE"
+        w = " AND ".join(where)
+        cte = f"""
+            WITH daily AS (
+                SELECT e.occurred_at::date AS processed_date,
+                       e.currency,
+                       COALESCE(SUM(CASE
+                         WHEN a.account_type='clearing'
+                          AND e.event_type='payment_captured'
+                          AND le.direction='debit' THEN le.amount_minor ELSE 0 END),0)::bigint AS processed_minor,
+                       COALESCE(SUM(CASE WHEN a.account_type='merchant_payable'
+                         THEN CASE WHEN le.direction='credit' THEN le.amount_minor ELSE -le.amount_minor END
+                         ELSE 0 END),0)::bigint AS payable_minor,
+                       COALESCE(SUM(CASE WHEN a.account_type='merchant_reserve'
+                         THEN CASE WHEN le.direction='credit' THEN le.amount_minor ELSE -le.amount_minor END
+                         ELSE 0 END),0)::bigint AS reserve_minor,
+                       COALESCE(SUM(CASE
+                         WHEN a.account_type='settlement_payable'
+                          AND e.event_type='settlement_completed'
+                          AND le.direction='debit' THEN le.amount_minor ELSE 0 END),0)::bigint AS paid_minor,
+                       COALESCE(SUM(CASE WHEN a.account_type IN ('merchant_payable','merchant_reserve','settlement_payable')
+                         THEN CASE WHEN le.direction='credit' THEN le.amount_minor ELSE -le.amount_minor END
+                         ELSE 0 END),0)::bigint AS balance_delta_minor,
+                       COUNT(DISTINCT e.id)::int AS event_count,
+                       (ARRAY_AGG(e.event_uuid::text ORDER BY e.occurred_at DESC, e.id DESC))[1] AS latest_event_uuid
+                  FROM ledger_events e
+                  JOIN ledger_entries le ON le.event_id=e.id
+                  JOIN accounts a ON a.id=le.account_id
+                 WHERE {w}
+                 GROUP BY e.occurred_at::date, e.currency
+            ), running AS (
+                SELECT *,
+                       SUM(balance_delta_minor) OVER (
+                         PARTITION BY currency ORDER BY processed_date
+                         ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW
+                       )::bigint AS balance_minor
+                  FROM daily
+            ), filtered AS (
+                SELECT * FROM running WHERE {filtered}
+            )
+        """
+        cur.execute(cte + "SELECT COUNT(*) AS n FROM filtered", p)
+        total = cur.fetchone()["n"]
+        p["lim"], p["off"] = page_size, (page - 1) * page_size
+        cur.execute(cte + """
+            SELECT * FROM filtered
+             ORDER BY processed_date DESC, currency
+             LIMIT %(lim)s OFFSET %(off)s
+        """, p)
+        items = []
+        for r in cur.fetchall():
+            confirm = r["latest_event_uuid"] or ""
+            items.append({
+                "row_id": f"{r['processed_date'].isoformat()}:{r['currency']}",
+                "processed_date": r["processed_date"].isoformat(),
+                "currency": r["currency"],
+                "processed_minor": int(r["processed_minor"] or 0),
+                "payable_minor": int(r["payable_minor"] or 0),
+                "reserve_minor": int(r["reserve_minor"] or 0),
+                "paid_minor": int(r["paid_minor"] or 0),
+                "balance_minor": int(r["balance_minor"] or 0),
+                "event_count": int(r["event_count"] or 0),
+                "confirmation": confirm[:12],
+                "confirmed": bool(confirm),
+            })
         return {"items": items, "total": int(total), "page": page, "page_size": page_size}
 
 
@@ -758,3 +1282,33 @@ def integrity(user: dict = Depends(current_user)):
                        "detail": f"{idem:,} unique source events map 1:1 to {s['events']:,} "
                                  "ledger events; replayed imports post nothing"})
         return {"checks": checks, "ok": all(c["ok"] for c in checks)}
+
+
+# ---------------------------------------------------------------- static frontend
+# In production the built SPA is served by the API itself, so the frontend's
+# relative `/api` calls hit the same origin (no CORS, no separate host). Active
+# only when TW_FRONTEND_DIR points at a built dist/; in local dev the Vite dev
+# server handles this instead, so this block is dormant.
+import os as _os  # noqa: E402
+from fastapi.staticfiles import StaticFiles  # noqa: E402
+from fastapi.responses import FileResponse  # noqa: E402
+
+_FRONTEND_DIR = _os.environ.get("TW_FRONTEND_DIR")
+if _FRONTEND_DIR and _os.path.isdir(_FRONTEND_DIR):
+    _ROOT = _os.path.realpath(_FRONTEND_DIR)
+    _INDEX = _os.path.join(_ROOT, "index.html")
+    _assets_dir = _os.path.join(_ROOT, "assets")
+    if _os.path.isdir(_assets_dir):
+        app.mount("/assets", StaticFiles(directory=_assets_dir), name="assets")
+
+    @app.get("/{full_path:path}", include_in_schema=False)
+    def _spa(full_path: str):
+        # unknown /api paths stay JSON 404s, never the SPA shell
+        if full_path.startswith("api/"):
+            err(404, "not_found", "not found")
+        # serve a real static file if it exists and is inside the dir (no traversal)
+        candidate = _os.path.realpath(_os.path.join(_ROOT, full_path))
+        if full_path and _os.path.commonpath([_ROOT, candidate]) == _ROOT and _os.path.isfile(candidate):
+            return FileResponse(candidate)
+        # otherwise return the SPA shell and let the client router take over
+        return FileResponse(_INDEX)

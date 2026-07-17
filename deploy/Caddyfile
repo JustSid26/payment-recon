@@ -1,0 +1,4 @@
+app.paymentrecon.site {
+	encode gzip
+	reverse_proxy backend:8000
+}
