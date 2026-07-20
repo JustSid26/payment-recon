@@ -38,6 +38,7 @@ function CurrencyCell({ currency }: { currency: string }) {
 
 const PAY_STATUS_LABEL: Record<LedgerPayStatus, string> = {
   paid: 'Paid',
+  in_settlement: 'In settlement',
   unpaid: 'Unpaid',
   na: '—',
 }
@@ -73,9 +74,12 @@ function aggregateRows(items: MerchantLedgerStatementRow[], dateFrom: string, da
       const sortedDesc = [...currencyRows].sort((a, b) => b.processed_date.localeCompare(a.processed_date))
       const latest = sortedDesc[0]
       const capRows = currencyRows.filter((row) => row.pay_status !== 'na')
+      // Worst state wins: one unsettled day makes the whole range unpaid, one
+      // still-generated settlement keeps it "in settlement" rather than paid.
       const wholeStatus: LedgerPayStatus =
         capRows.length === 0 ? 'na'
           : capRows.some((row) => row.pay_status === 'unpaid') ? 'unpaid'
+          : capRows.some((row) => row.pay_status === 'in_settlement') ? 'in_settlement'
           : 'paid'
       return {
         row_id: `whole:${currency}`,

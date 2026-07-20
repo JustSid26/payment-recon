@@ -425,6 +425,8 @@ table.data tbody tr.click:hover { background: #f8faff; }
 }
 .pay-pill.paid { background: var(--green-bg); border-color: var(--green-border); color: var(--green); }
 .pay-pill.unpaid { background: var(--amber-bg, #fff7ed); border-color: var(--amber-border, #fed7aa); color: var(--amber, #b45309); }
+.pay-pill.in_settlement { background: #eff6ff; border-color: #bfdbfe; color: #1d4ed8; }
+.daily-payout-status { margin-top: 10px; }
 
 /* compact date input for statement filters */
 .input.sm { padding: 5px 9px; font-size: 12.5px; max-width: 160px; }

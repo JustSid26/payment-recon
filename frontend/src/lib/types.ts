@@ -349,7 +349,9 @@ export interface MerchantLedgerEntry extends AccountEntry {
   account_id: number
 }
 
-export type LedgerPayStatus = 'paid' | 'unpaid' | 'na'
+// 'in_settlement' = every capture that day is attached to a settlement that is still
+// `generated` — the payout hasn't been posted to the ledger yet, so it isn't 'paid'.
+export type LedgerPayStatus = 'paid' | 'in_settlement' | 'unpaid' | 'na'
 
 export interface MerchantLedgerStatementRow {
   row_id: string

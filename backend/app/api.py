@@ -1197,9 +1197,12 @@ def merchant_ledger_statement(muuid: str, user: dict = Depends(current_user),
     """Merchant-facing daily ledger statement, one row per processed date/currency.
 
     `pay_status` per row reflects whether that day's captured transactions have been
-    paid out to the merchant ('paid' = all settled+completed, 'unpaid' = still owed,
-    'na' = no captures that day, e.g. a pure payout/reserve row). `status=paid|unpaid`
-    filters to those rows."""
+    paid out to the merchant: 'paid' = every capture sits in a *completed* settlement
+    (the payout was actually posted to the ledger), 'in_settlement' = every capture is
+    attached to a settlement that is still `generated` (payout not posted yet),
+    'unpaid' = some captures aren't in any settlement, 'na' = no captures that day
+    (e.g. a pure payout/reserve row). `status=paid` filters to paid days; `unpaid`
+    means "not yet paid out" and so covers both 'unpaid' and 'in_settlement'."""
     with get_pool().connection() as conn:
         cur = conn.cursor()
         cur.execute("SELECT id FROM merchants WHERE merchant_uuid=%s", (muuid,))
@@ -1216,8 +1219,12 @@ def merchant_ledger_statement(muuid: str, user: dict = Depends(current_user),
             p["q"] = f"%{q.strip().replace(' ', '%')}%"
             filters.append("(currency ILIKE %(q)s OR latest_event_uuid ILIKE %(q)s OR processed_date::text ILIKE %(q)s)")
         status = (status or "").strip().lower()
-        if status in ("paid", "unpaid"):
-            filters.append("pay_status = %(pstatus)s"); p["pstatus"] = status
+        if status == "paid":
+            filters.append("pay_status = 'paid'")
+        elif status == "unpaid":            # "not yet paid out" — includes in-settlement days
+            filters.append("pay_status IN ('unpaid', 'in_settlement')")
+        elif status == "in_settlement":
+            filters.append("pay_status = 'in_settlement'")
         filtered = " AND ".join(filters) if filters else "TRUE"
         w = " AND ".join(where)
         cte = f"""
@@ -1248,6 +1255,7 @@ def merchant_ledger_statement(muuid: str, user: dict = Depends(current_user),
             ), settle_status AS (
                 SELECT e.occurred_at::date AS processed_date, e.currency,
                        COUNT(*) AS cap_n,
+                       COUNT(si.event_id) AS n_settled,
                        COUNT(*) FILTER (WHERE s.state='completed') AS n_completed
                   FROM ledger_events e
                   LEFT JOIN settlement_items si ON si.event_id=e.id
@@ -1259,6 +1267,7 @@ def merchant_ledger_statement(muuid: str, user: dict = Depends(current_user),
                        CASE
                          WHEN COALESCE(ss.cap_n, 0) = 0 THEN 'na'
                          WHEN ss.n_completed = ss.cap_n THEN 'paid'
+                         WHEN ss.n_settled = ss.cap_n THEN 'in_settlement'
                          ELSE 'unpaid'
                        END AS pay_status
                   FROM daily d

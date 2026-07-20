@@ -482,33 +482,19 @@ export default function SettlementDetailPage() {
 function DailyView({ days, loading, s }: { days: SettlementDayRow[]; loading: boolean; s: SettlementDetail }) {
   const ccy = s.currency
   const fs = s.fee_schedule
-  const storageKey = `tw:daily-payouts:${s.settlement_uuid}`
   const [selectedDate, setSelectedDate] = useState('')
-  const [paidDays, setPaidDays] = useState<Set<string>>(() => {
-    try {
-      return new Set(JSON.parse(localStorage.getItem(storageKey) || '[]'))
-    } catch {
-      return new Set()
-    }
-  })
 
-  useEffect(() => {
-    try {
-      setPaidDays(new Set(JSON.parse(localStorage.getItem(storageKey) || '[]')))
-    } catch {
-      setPaidDays(new Set())
-    }
-  }, [storageKey])
+  // A settlement pays out as ONE unit — completing it posts a single payout of
+  // net_payout_minor covering every day in the window. So a day is paid iff the
+  // settlement itself is completed; there is no per-day payout to mark. This is
+  // the same truth the merchant ledger's pay_status reads, so the two views agree.
+  const settlementPaid = s.state === 'completed'
 
   useEffect(() => {
     if (days.length > 0 && !days.some((d) => d.date === selectedDate)) {
       setSelectedDate(days[0].date)
     }
   }, [days, selectedDate])
-
-  useEffect(() => {
-    localStorage.setItem(storageKey, JSON.stringify(Array.from(paidDays)))
-  }, [storageKey, paidDays])
 
   if (loading) return <LoadingBlock label="Loading day-wise report…" />
   if (days.length === 0)
@@ -523,16 +509,6 @@ function DailyView({ days, loading, s }: { days: SettlementDayRow[]; loading: bo
   const subtotal = sum('net_minor')
   const payout = sum('payout_minor')
   const selected = days.find((d) => d.date === selectedDate) ?? days[0]
-  const selectedPaid = paidDays.has(selected.date)
-  const paidCount = days.filter((d) => paidDays.has(d.date)).length
-  const togglePaid = () => {
-    setPaidDays((prev) => {
-      const next = new Set(prev)
-      if (next.has(selected.date)) next.delete(selected.date)
-      else next.add(selected.date)
-      return next
-    })
-  }
 
   return (
     <div className="stack">
@@ -553,9 +529,17 @@ function DailyView({ days, loading, s }: { days: SettlementDayRow[]; loading: bo
           <div className="dim small">applied once to whole settlement</div>
         </div>
         <div className="card stat-card">
-          <div className="label">Day payouts marked</div>
-          <div className="value">{fmtInt(paidCount)} / {fmtInt(days.length)}</div>
-          <div className="dim small">total daily payout {fmtMoney(payout, ccy)}</div>
+          <div className="label">Payout status</div>
+          <div className="value">
+            <span className={`pay-pill ${settlementPaid ? 'paid' : 'in_settlement'}`}>
+              {settlementPaid ? 'Paid' : 'Pending payout'}
+            </span>
+          </div>
+          <div className="dim small">
+            {settlementPaid
+              ? `all ${fmtInt(days.length)} days paid · total ${fmtMoney(payout, ccy)}`
+              : `${fmtInt(days.length)} days awaiting one payout of ${fmtMoney(payout, ccy)}`}
+          </div>
         </div>
       </div>
 
@@ -567,7 +551,6 @@ function DailyView({ days, loading, s }: { days: SettlementDayRow[]; loading: bo
           </div>
           <div className="daily-day-options">
             {days.map((d) => {
-              const paid = paidDays.has(d.date)
               return (
                 <button
                   key={d.date}
@@ -580,7 +563,7 @@ function DailyView({ days, loading, s }: { days: SettlementDayRow[]; loading: bo
                   </span>
                   <span className="daily-day-amount">
                     {fmtMoney(d.payout_minor, ccy)}
-                    {paid && <span className="chip green">Paid</span>}
+                    {settlementPaid && <span className="chip green">Paid</span>}
                   </span>
                 </button>
               )
@@ -595,8 +578,7 @@ function DailyView({ days, loading, s }: { days: SettlementDayRow[]; loading: bo
           merchantName={s.merchant_name}
           windowStart={s.window_start}
           windowEnd={s.window_end}
-          paid={selectedPaid}
-          onTogglePaid={togglePaid}
+          paid={settlementPaid}
         />
       </div>
     </div>
@@ -611,7 +593,6 @@ function DailyStatement({
   windowStart,
   windowEnd,
   paid,
-  onTogglePaid,
 }: {
   day: SettlementDayRow
   ccy: string
@@ -620,7 +601,6 @@ function DailyStatement({
   windowStart: string
   windowEnd: string
   paid: boolean
-  onTogglePaid: () => void
 }) {
   const settlementFeeDetail = basisLabel(percentBasis(feeSchedule?.settlement_fee_bps))
 
@@ -648,9 +628,16 @@ function DailyStatement({
             <span>Day net payout</span>
             <b>{fmtMoney(day.payout_minor, ccy)}</b>
           </div>
-          <button className={paid ? 'btn sm success' : 'btn sm'} onClick={onTogglePaid} data-print="hide">
-            {paid ? 'Paid for day' : '✓ Mark day paid'}
-          </button>
+          <div className="daily-payout-status">
+            <span className={`pay-pill ${paid ? 'paid' : 'in_settlement'}`}>
+              {paid ? 'Paid' : 'Pending payout'}
+            </span>
+            <div className="dim small" style={{ marginTop: 6 }}>
+              {paid
+                ? 'settled in this settlement’s payout'
+                : 'paid when this settlement is completed'}
+            </div>
+          </div>
         </div>
       </div>
 
