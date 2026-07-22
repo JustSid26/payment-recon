@@ -700,6 +700,10 @@ table.data tbody tr.click:hover { background: #f8faff; }
 .field { display: flex; flex-direction: column; gap: 5px; }
 .field label { font-size: 12px; font-weight: 600; color: var(--ink-2); }
 
+.settings-form { display: flex; flex-direction: column; gap: 14px; max-width: 520px; }
+.settings-status { display: flex; flex-direction: column; gap: 8px; }
+.settings-test { display: flex; gap: 12px; align-items: flex-end; max-width: 520px; }
+
 .filter-bar {
   display: flex; gap: 10px; flex-wrap: wrap; align-items: center;
   padding: 12px 14px;

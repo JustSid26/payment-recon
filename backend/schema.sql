@@ -207,6 +207,15 @@ CREATE INDEX IF NOT EXISTS ix_events_settle_after
 -- Merchant contact email — recipient for automated payout-confirmation emails.
 ALTER TABLE merchants ADD COLUMN IF NOT EXISTS email TEXT;
 
+-- App-wide settings (key/value). Used for the outbound-mail configuration so the
+-- sending account can be set from the admin UI instead of only via env vars.
+-- Values here OVERRIDE the matching TW_* environment variables at runtime.
+CREATE TABLE IF NOT EXISTS app_settings (
+  key        TEXT PRIMARY KEY,
+  value      TEXT,
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
 -- Quarantine: unknown merchants (no configured fee schedule) have their
 -- transactions imported but NO ledger events posted until a schedule is assigned.
 -- ledger_posted=false marks such quarantined rows; merchants.status='unconfigured'

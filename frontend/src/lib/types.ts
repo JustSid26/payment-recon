@@ -387,6 +387,37 @@ export interface IntegrityReport {
   ok: boolean
 }
 
+// ---- Admin: outbound mail settings ----
+export interface MailFieldState {
+  source: 'db' | 'env' | 'unset'
+  set: boolean
+  value?: string | null
+}
+
+export interface MailStatus {
+  configured: boolean
+  from: string | null
+  disabled: boolean
+}
+
+export interface MailSettings {
+  status: MailStatus
+  config: {
+    TW_MAIL_FROM: MailFieldState
+    TW_MAIL_ENABLED: MailFieldState
+    TW_GMAIL_CLIENT_ID: MailFieldState
+    TW_GMAIL_CLIENT_SECRET: MailFieldState
+    TW_GMAIL_REFRESH_TOKEN: MailFieldState
+  }
+}
+
+export interface MailSendResult {
+  sent: boolean
+  id?: string
+  to?: string
+  reason?: string
+}
+
 // ---- Admin: status / reset / upload ----
 export interface AdminStatus {
   counts: {

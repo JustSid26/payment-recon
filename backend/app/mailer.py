@@ -36,6 +36,15 @@ _token_expiry: float = 0.0
 
 
 def _cfg(name: str) -> str:
+    """Config value for a key: a DB override (set from the settings UI) wins,
+    else the environment variable. Import is local to avoid a cycle at module load."""
+    try:
+        from . import settings_store
+        override = settings_store.get(name)
+    except Exception:
+        override = None
+    if override:
+        return override.strip()
     return (os.environ.get(name) or "").strip()
 
 

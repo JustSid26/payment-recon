@@ -17,6 +17,7 @@ import Integrity from './pages/Integrity'
 import Reserve from './pages/Reserve'
 import RollingReserve from './pages/RollingReserve'
 import Upload from './pages/Upload'
+import Settings from './pages/Settings'
 
 function RequireAuth({ children }: { children: React.ReactElement }) {
   const location = useLocation()
@@ -108,6 +109,14 @@ export default function App() {
               <MerchantOnly>
                 <Reserve />
               </MerchantOnly>
+            }
+          />
+          <Route
+            path="/settings"
+            element={
+              <AdminOnly>
+                <Settings />
+              </AdminOnly>
             }
           />
           <Route path="*" element={<Navigate to="/" replace />} />

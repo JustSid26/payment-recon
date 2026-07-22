@@ -18,6 +18,7 @@ from . import cycle as cycle_mod
 from . import onboarding as onboarding_mod
 from . import mailer as mailer_mod
 from . import settlement_email as settlement_email_mod
+from . import settings_store as settings_store_mod
 
 app = FastAPI(title="Transactworld Ledger API")
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"],
@@ -896,6 +897,61 @@ def send_settlement_confirmation(suuid: str, user: dict = Depends(require_admin)
 def email_status(user: dict = Depends(require_admin)):
     """Whether the Gmail mailer is configured (for a settings/health view)."""
     return mailer_mod.status()
+
+
+# ---------------------------------------------------------------- mail settings
+@app.get("/api/settings/mail")
+def get_mail_settings(user: dict = Depends(require_admin)):
+    """Outbound-mail config for the Settings tab. Secrets are never echoed back —
+    only a set/unset flag and the source (db override vs env fallback)."""
+    return {"status": mailer_mod.status(), "config": settings_store_mod.mail_overview()}
+
+
+class MailSettingsBody(BaseModel):
+    # All optional: a field left out (None) is UNCHANGED; an empty string CLEARS the
+    # override (reverting to the env var, if any). Secrets are write-only — send a new
+    # value to set/replace, omit to keep the stored one.
+    from_addr: str | None = None
+    enabled: bool | None = None
+    client_id: str | None = None
+    client_secret: str | None = None
+    refresh_token: str | None = None
+
+
+@app.put("/api/settings/mail")
+def update_mail_settings(body: MailSettingsBody, user: dict = Depends(require_admin)):
+    """Persist the sending account. Values are stored in app_settings and override
+    the TW_* env vars at runtime — no redeploy needed."""
+    changes: dict[str, str | None] = {}
+    if body.from_addr is not None:
+        changes["TW_MAIL_FROM"] = body.from_addr
+    if body.client_id is not None:
+        changes["TW_GMAIL_CLIENT_ID"] = body.client_id
+    if body.client_secret is not None:
+        changes["TW_GMAIL_CLIENT_SECRET"] = body.client_secret
+    if body.refresh_token is not None:
+        changes["TW_GMAIL_REFRESH_TOKEN"] = body.refresh_token
+    if body.enabled is not None:
+        # is_configured() treats "0" as the off-switch; clear the key to mean "on".
+        changes["TW_MAIL_ENABLED"] = "" if body.enabled else "0"
+    with get_pool().connection() as conn:
+        settings_store_mod.save(conn, changes)
+    return {"status": mailer_mod.status(), "config": settings_store_mod.mail_overview()}
+
+
+class MailTestBody(BaseModel):
+    to: str
+
+
+@app.post("/api/settings/mail/test")
+def send_mail_test(body: MailTestBody, user: dict = Depends(require_admin)):
+    """Send a small test email to confirm the sending account works end-to-end."""
+    html = (
+        "<p>This is a test email from <b>TransactWorld</b>.</p>"
+        "<p>If you received this, payout-confirmation emails will send from "
+        f"<b>{mailer_mod.status().get('from') or 'this account'}</b>.</p>"
+    )
+    return mailer_mod.send(body.to, "TransactWorld — test email", html)
 
 
 class CycleBody(BaseModel):

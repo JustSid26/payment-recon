@@ -13,6 +13,7 @@ const ADMIN_NAV = [
   { to: '/rolling-reserve', label: 'Rolling reserve', icon: 'savings' },
   { to: '/ledger', label: 'Ledger', icon: 'account_balance_wallet' },
   { to: '/integrity', label: 'Integrity', icon: 'verified_user' },
+  { to: '/settings', label: 'Settings', icon: 'settings' },
 ]
 
 const MERCHANT_NAV = [
