@@ -77,7 +77,7 @@ export default function Settings() {
   const status = data?.status
 
   return (
-    <div className="stack">
+    <div className="stack settings-page">
       <div className="page-head">
         <div>
           <h1>Settings</h1>
@@ -92,8 +92,8 @@ export default function Settings() {
 
       {data && (
         <>
-          <div className="card">
-            <div className="settings-status">
+          <div className={`card settings-banner ${status?.configured ? 'ok' : 'warn'}`}>
+            <div className="settings-body settings-status">
               <span className={`pay-pill ${status?.configured ? 'paid' : 'unpaid'}`}>
                 {status?.configured ? '● Sending enabled' : '○ Not configured'}
               </span>
@@ -107,13 +107,14 @@ export default function Settings() {
 
           <div className="card">
             <div className="card-title">Sending account</div>
-            <div className="dim small" style={{ marginBottom: 14 }}>
-              Emails send through the Gmail API. Enter the sender address and its OAuth
-              credentials (client ID/secret + refresh token minted for that mailbox).
-              Saved values override the server env vars — no redeploy needed.
-            </div>
+            <div className="settings-body">
+              <div className="dim small" style={{ marginBottom: 16 }}>
+                Emails send through the Gmail API. Enter the sender address and its OAuth
+                credentials (client ID/secret + refresh token minted for that mailbox).
+                Saved values override the server env vars — no redeploy needed.
+              </div>
 
-            <div className="settings-form">
+              <div className="settings-form">
               <div className="field">
                 <label>From address</label>
                 <input
@@ -174,39 +175,42 @@ export default function Settings() {
                 <button className="btn primary" onClick={() => void save()} disabled={saving}>
                   {saving ? 'Saving…' : 'Save settings'}
                 </button>
+                </div>
               </div>
             </div>
           </div>
 
           <div className="card">
             <div className="card-title">Send a test email</div>
-            <div className="dim small" style={{ marginBottom: 14 }}>
-              Verify the sending account works before relying on automated payouts.
-            </div>
-            <div className="settings-test">
-              <div className="field" style={{ flex: 1 }}>
-                <label>Recipient</label>
-                <input
-                  className="input"
-                  placeholder="you@example.com"
-                  value={testTo}
-                  onChange={(e) => setTestTo(e.target.value)}
-                />
+            <div className="settings-body">
+              <div className="dim small" style={{ marginBottom: 16 }}>
+                Verify the sending account works before relying on automated payouts.
               </div>
-              <button
-                className="btn"
-                onClick={() => void sendTest()}
-                disabled={testing || !testTo.trim() || !status?.configured}
-                title={status?.configured ? '' : 'Configure and save the sending account first'}
-              >
-                {testing ? 'Sending…' : '✉ Send test'}
-              </button>
-            </div>
-            {testResult && (
-              <div className={`dim small ${testResult.sent ? '' : ''}`} style={{ marginTop: 10, color: testResult.sent ? 'var(--green)' : 'var(--red)' }}>
-                {testResult.sent ? `Sent ✓ (message ${testResult.id})` : `Not sent: ${testResult.reason}`}
+              <div className="settings-test">
+                <div className="field" style={{ flex: 1 }}>
+                  <label>Recipient</label>
+                  <input
+                    className="input"
+                    placeholder="you@example.com"
+                    value={testTo}
+                    onChange={(e) => setTestTo(e.target.value)}
+                  />
+                </div>
+                <button
+                  className="btn"
+                  onClick={() => void sendTest()}
+                  disabled={testing || !testTo.trim() || !status?.configured}
+                  title={status?.configured ? '' : 'Configure and save the sending account first'}
+                >
+                  {testing ? 'Sending…' : '✉ Send test'}
+                </button>
               </div>
-            )}
+              {testResult && (
+                <div className="small" style={{ marginTop: 12, color: testResult.sent ? 'var(--green)' : 'var(--red)' }}>
+                  {testResult.sent ? `Sent ✓ (message ${testResult.id})` : `Not sent: ${testResult.reason}`}
+                </div>
+              )}
+            </div>
           </div>
         </>
       )}
