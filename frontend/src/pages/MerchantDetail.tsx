@@ -29,6 +29,13 @@ function bps(n: number | null | undefined): string {
   return `${(n / 100).toFixed(2).replace(/\.?0+$/, '')}%`
 }
 
+type GenResult = {
+  currency: string
+  status: 'generated' | 'skipped' | 'error'
+  detail: string
+  uuid?: string
+}
+
 export default function MerchantDetailPage() {
   const { uuid } = useParams<{ uuid: string }>()
   const navigate = useNavigate()
@@ -98,6 +105,7 @@ export default function MerchantDetailPage() {
   const [genEnd, setGenEnd] = useState('')
   const [genBusy, setGenBusy] = useState(false)
   const [genMsg, setGenMsg] = useState<string | null>(null)
+  const [genResults, setGenResults] = useState<GenResult[] | null>(null)
 
   const openGen = () => {
     // Default the window so the user doesn't have to guess: end = today (only
@@ -107,11 +115,28 @@ export default function MerchantDetailPage() {
     const today = new Date()
     const start = new Date()
     start.setDate(today.getDate() - 30)
-    setGenCcy(currencies[0] ?? 'USD')
+    setGenCcy(currencies.length > 1 ? 'ALL' : currencies[0] ?? 'USD')
     setGenStart(iso(start))
     setGenEnd(iso(today))
     setGenMsg(null)
+    setGenResults(null)
     setShowGen(true)
+  }
+
+  const genCurrencies = currencies.length ? currencies : ['USD', 'EUR']
+
+  const generateOne = async (currency: string): Promise<GenResult> => {
+    try {
+      const res = await api<SettlementDetail | GenerateSkipped>('/api/settlements/generate', {
+        method: 'POST',
+        body: { merchant_uuid: uuid, currency, window_start: genStart, window_end: genEnd },
+      })
+      if ('skipped' in res && res.skipped) return { currency, status: 'skipped', detail: res.reason }
+      const s = res as SettlementDetail
+      return { currency, status: 'generated', detail: `Net ${fmtMoney(s.breakdown.net_payout_minor, currency)}`, uuid: s.settlement_uuid }
+    } catch (e) {
+      return { currency, status: 'error', detail: e instanceof ApiError ? e.message : 'failed' }
+    }
   }
 
   const doGenerate = async () => {
@@ -121,21 +146,34 @@ export default function MerchantDetailPage() {
     }
     setGenBusy(true)
     setGenMsg(null)
-    try {
-      const res = await api<SettlementDetail | GenerateSkipped>('/api/settlements/generate', {
-        method: 'POST',
-        body: { merchant_uuid: uuid, currency: genCcy, window_start: genStart, window_end: genEnd },
-      })
-      if ('skipped' in res && res.skipped) {
-        setGenMsg(`Skipped — ${res.reason}`)
-      } else {
-        toastSuccess('Settlement generated')
-        navigate(`/settlements/${(res as SettlementDetail).settlement_uuid}`)
-      }
-    } catch (e) {
-      setGenMsg(e instanceof ApiError ? e.message : 'Failed to generate settlement')
-    } finally {
+    setGenResults(null)
+
+    // Single currency: keep the fast path — jump straight to the new settlement.
+    if (genCcy !== 'ALL') {
+      const r = await generateOne(genCcy)
       setGenBusy(false)
+      if (r.status === 'generated' && r.uuid) {
+        toastSuccess('Settlement generated')
+        navigate(`/settlements/${r.uuid}`)
+      } else {
+        setGenMsg(r.status === 'skipped' ? `Skipped — ${r.detail}` : r.detail)
+      }
+      return
+    }
+
+    // All currencies: one settlement per currency, in sequence, then a summary.
+    const results: GenResult[] = []
+    for (const c of genCurrencies) results.push(await generateOne(c))
+    setGenResults(results)
+    setGenBusy(false)
+    const gen = results.filter((r) => r.status === 'generated').length
+    if (gen > 0) {
+      toastSuccess(`Generated ${gen} settlement${gen === 1 ? '' : 's'} across ${genCurrencies.length} currencies`)
+      reloadMerchant()
+      settlements.reload()
+      reserve.reload()
+    } else {
+      setGenMsg('No settlements generated — see the per-currency results below.')
     }
   }
 
@@ -415,9 +453,17 @@ export default function MerchantDetailPage() {
           onClose={() => setShowGen(false)}
           footer={
             <>
-              <button className="btn" onClick={() => setShowGen(false)} disabled={genBusy}>Cancel</button>
+              <button className="btn" onClick={() => setShowGen(false)} disabled={genBusy}>
+                {genResults ? 'Close' : 'Cancel'}
+              </button>
               <button className="btn primary" onClick={() => void doGenerate()} disabled={genBusy}>
-                {genBusy ? 'Generating…' : 'Generate'}
+                {genBusy
+                  ? 'Generating…'
+                  : genResults
+                    ? 'Regenerate'
+                    : genCcy === 'ALL'
+                      ? `Generate all (${genCurrencies.length})`
+                      : 'Generate'}
               </button>
             </>
           }
@@ -429,11 +475,18 @@ export default function MerchantDetailPage() {
           {genMsg && <div className="form-error">{genMsg}</div>}
           <div className="field">
             <label>Currency</label>
-            <select className="select" value={genCcy} onChange={(e) => setGenCcy(e.target.value)}>
-              {(currencies.length ? currencies : ['USD', 'EUR']).map((c) => (
+            <select className="select" value={genCcy} onChange={(e) => { setGenCcy(e.target.value); setGenResults(null) }}>
+              {genCurrencies.length > 1 && <option value="ALL">All currencies ({genCurrencies.length})</option>}
+              {genCurrencies.map((c) => (
                 <option key={c} value={c}>{c}</option>
               ))}
             </select>
+            {genCcy === 'ALL' && (
+              <div className="dim small" style={{ marginTop: 6 }}>
+                Generates one settlement per currency ({genCurrencies.join(', ')}) for the same window. Currencies
+                with nothing matured to settle are skipped.
+              </div>
+            )}
           </div>
           <div className="field">
             <label>Window start</label>
@@ -449,6 +502,29 @@ export default function MerchantDetailPage() {
               capture) are paid out; anything not yet matured in the range is skipped, with the date it becomes settleable.
             </div>
           </div>
+
+          {genResults && (
+            <div className="stack" style={{ gap: 6, marginTop: 14 }}>
+              <div className="section-head" style={{ marginBottom: 0 }}>
+                <span className="st">Results by currency</span>
+              </div>
+              {genResults.map((r) => (
+                <div className={`file-result ${r.status === 'generated' ? 'ok' : r.status === 'error' ? 'bad' : ''}`} key={r.currency}>
+                  <span className="mark">{r.status === 'generated' ? '✓' : r.status === 'error' ? '✗' : '–'}</span>
+                  <div style={{ minWidth: 0, flex: 1 }}>
+                    <div className="fr-name">
+                      <span className="ccy-tag">{r.currency}</span>{' '}
+                      {r.status === 'generated' ? 'Generated' : r.status === 'skipped' ? 'Skipped' : 'Error'}
+                    </div>
+                    <div className="dim small">{r.detail}</div>
+                  </div>
+                  {r.uuid && (
+                    <Link to={`/settlements/${r.uuid}`} className="small" onClick={() => setShowGen(false)}>Open →</Link>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
         </Modal>
       )}
 
