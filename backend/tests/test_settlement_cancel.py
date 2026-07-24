@@ -158,6 +158,46 @@ def test_generate_per_day_makes_one_settlement_each(conn):
     assert _unbalanced(conn) == 0
 
 
+def test_complete_day_partial_payout(conn):
+    da = datetime(2026, 6, 25, 9, 0, tzinfo=timezone.utc)
+    dbd = datetime(2026, 6, 26, 9, 0, tzinfo=timezone.utc)
+    _capture(conn, "cd_a", da)
+    _capture(conn, "cd_b", dbd)
+    ws = datetime(2026, 6, 25, 0, 0, tzinfo=timezone.utc)
+    we = datetime(2026, 6, 26, 23, 59, 59, tzinfo=timezone.utc)
+    res = settle_mod.generate(conn, merchant_id=1, currency="EUR",
+                              window_start=ws, window_end=we, cutoff=NOW)
+    conn.commit()
+    sid = res["settlement_id"]
+
+    dp = settle_mod.day_payouts(conn, sid)
+    assert dp["days_total"] == 2 and dp["days_paid"] == 0 and dp["per_day_available"]
+    # per-day payouts sum EXACTLY to the settlement net (fee allocation reconciles)
+    assert sum(d["payout_minor"] for d in dp["days"]) == dp["net_payout_minor"]
+    d0, d1 = dp["days"][0]["day"], dp["days"][1]["day"]
+
+    # pay only the first day → that day paid, settlement still generated
+    out = settle_mod.complete_day(conn, sid, d0)
+    conn.commit()
+    assert out["completed"] is False and out["days_paid"] == 1
+    cur = conn.cursor()
+    cur.execute("SELECT state FROM settlements WHERE id=%s", (sid,))
+    assert cur.fetchone()["state"] == "generated"
+    assert _unbalanced(conn) == 0
+    # re-paying the same day is a no-op; cancel is refused once a day is paid
+    assert settle_mod.complete_day(conn, sid, d0).get("already_paid")
+    with pytest.raises(settle_mod.SettlementError):
+        settle_mod.cancel(conn, sid)
+
+    # pay the last day → settlement flips to completed
+    out2 = settle_mod.complete_day(conn, sid, d1)
+    conn.commit()
+    assert out2["completed"] is True
+    cur.execute("SELECT state FROM settlements WHERE id=%s", (sid,))
+    assert cur.fetchone()["state"] == "completed"
+    assert _unbalanced(conn) == 0
+
+
 def test_cannot_cancel_completed(conn):
     day_c = datetime(2026, 6, 15, 10, 0, tzinfo=timezone.utc)  # own day → own run-key
     _capture(conn, "c", day_c)

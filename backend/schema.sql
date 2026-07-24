@@ -174,6 +174,20 @@ CREATE TABLE IF NOT EXISTS settlement_items (
 );
 CREATE UNIQUE INDEX IF NOT EXISTS ux_settlement_items_event ON settlement_items (event_id);
 
+-- Per-day payouts within one settlement. A settlement can be paid out day by day
+-- (partial completion): each row records a processing day that has been paid, the
+-- ledger event that moved the money, and the amount. The settlement flips to
+-- 'completed' once every one of its days is paid.
+CREATE TABLE IF NOT EXISTS settlement_day_payouts (
+  settlement_id    BIGINT NOT NULL REFERENCES settlements(id),
+  day              DATE NOT NULL,
+  payout_minor     BIGINT NOT NULL,
+  event_id         BIGINT NOT NULL,
+  payout_reference TEXT,
+  paid_at          TIMESTAMPTZ NOT NULL DEFAULT now(),
+  PRIMARY KEY (settlement_id, day)
+);
+
 CREATE TABLE IF NOT EXISTS reserve_holds (
   id              BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
   merchant_id     BIGINT NOT NULL,

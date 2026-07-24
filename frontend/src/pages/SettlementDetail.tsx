@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import { api, ApiError, getUser } from '../lib/api'
 import { useApi } from '../lib/useApi'
-import type { SettlementDetail, SettlementLineItem } from '../lib/types'
+import type { DayPayouts, SettlementDetail, SettlementLineItem } from '../lib/types'
 import { fmtDate, fmtDateTime, fmtInt, fmtMoney, fmtMoneySigned } from '../lib/money'
 import { LoadingBlock, Modal, StatusChip, toastError, toastSuccess } from '../components/ui'
 import { downloadCSV, downloadExcel, printToPDF, toMajor } from '../lib/export'
@@ -242,9 +242,27 @@ export default function SettlementDetailPage() {
   const isAdmin = getUser()?.role === 'admin'
   const { data: s, loading, reload } = useApi(() => api<SettlementDetail>(`/api/settlements/${uuid}`), [uuid])
   const lines = useApi(() => api<{ items: SettlementLineItem[] }>(`/api/settlements/${uuid}/items`), [uuid])
+  const dayPay = useApi(() => api<DayPayouts>(`/api/settlements/${uuid}/day-payouts`), [uuid])
   const [view, setView] = useState<View>('statement')
   const [completing, setCompleting] = useState(false)
   const [showConfirm, setShowConfirm] = useState(false)
+  const [confirmDayValue, setConfirmDayValue] = useState<string | null>(null)
+  const [confirmingDay, setConfirmingDay] = useState(false)
+
+  const doConfirmDay = async (day: string) => {
+    setConfirmingDay(true)
+    try {
+      await api(`/api/settlements/${uuid}/days/${day}/complete`, { method: 'POST' })
+      toastSuccess(`Payout confirmed for ${fmtDate(day)}`)
+      setConfirmDayValue(null)
+      reload()
+      dayPay.reload()
+    } catch (e) {
+      toastError(e instanceof ApiError ? e.message : 'Failed to confirm this day’s payout')
+    } finally {
+      setConfirmingDay(false)
+    }
+  }
 
   const markCompleted = async () => {
     setCompleting(true)
@@ -503,6 +521,9 @@ export default function SettlementDetailPage() {
           baseName={base}
           canConfirm={isAdmin && s.state === 'generated'}
           onConfirm={() => setShowConfirm(true)}
+          dayPay={dayPay.data}
+          confirming={confirmingDay}
+          onConfirmDay={(day) => setConfirmDayValue(day)}
         />
       ) : (
         <LinesView items={items} loading={lines.loading} ccy={ccy} />
@@ -529,6 +550,33 @@ export default function SettlementDetailPage() {
             <li>Posts the payout to the ledger (settlement → paid; money leaves the gateway clearing account).</li>
             <li>Marks this settlement <b>completed</b> — it moves from “In settlement” to “Paid” on the merchant’s balances and daily records.</li>
             <li>Emails the payout confirmation to the merchant (if an email is on file).</li>
+          </ul>
+          <div className="dim small" style={{ marginTop: 10 }}>This posts an append-only ledger event and cannot be undone from the UI.</div>
+        </Modal>
+      )}
+
+      {confirmDayValue && (
+        <Modal
+          title="Confirm day payout"
+          onClose={() => (confirmingDay ? null : setConfirmDayValue(null))}
+          footer={
+            <>
+              <button className="btn" onClick={() => setConfirmDayValue(null)} disabled={confirmingDay}>Cancel</button>
+              <button className="btn primary" onClick={() => void doConfirmDay(confirmDayValue)} disabled={confirmingDay}>
+                {confirmingDay
+                  ? 'Posting payout…'
+                  : `Confirm & pay ${fmtMoney(dayPay.data?.days.find((d) => d.day === confirmDayValue)?.payout_minor ?? 0, ccy)}`}
+              </button>
+            </>
+          }
+        >
+          <div>
+            Pay <b>{fmtMoney(dayPay.data?.days.find((d) => d.day === confirmDayValue)?.payout_minor ?? 0, ccy)}</b> for{' '}
+            <b>{fmtDate(confirmDayValue)}</b> to <b>{s.merchant_name}</b>.
+          </div>
+          <ul className="dim small" style={{ margin: '10px 0 0', paddingLeft: 18, lineHeight: 1.7 }}>
+            <li>Pays <b>only this day</b> to the ledger — other days stay pending.</li>
+            <li>The settlement is marked <b>completed</b> once every day has been paid.</li>
           </ul>
           <div className="dim small" style={{ marginTop: 10 }}>This posts an append-only ledger event and cannot be undone from the UI.</div>
         </Modal>
@@ -562,7 +610,7 @@ export default function SettlementDetailPage() {
   )
 }
 
-function DailyView({ days, loading, s, items, baseName, canConfirm, onConfirm }: {
+function DailyView({ days, loading, s, items, baseName, canConfirm, onConfirm, dayPay, confirming, onConfirmDay }: {
   days: SettlementDayRow[]
   loading: boolean
   s: SettlementDetail
@@ -570,16 +618,23 @@ function DailyView({ days, loading, s, items, baseName, canConfirm, onConfirm }:
   baseName: string
   canConfirm: boolean
   onConfirm: () => void
+  dayPay: DayPayouts | null
+  confirming: boolean
+  onConfirmDay: (day: string) => void
 }) {
   const ccy = s.currency
   const fs = s.fee_schedule
   const [selectedDate, setSelectedDate] = useState('')
 
-  // A settlement pays out as ONE unit — completing it posts a single payout of
-  // net_payout_minor covering every day in the window. So a day is paid iff the
-  // settlement itself is completed; there is no per-day payout to mark. This is
-  // the same truth the merchant ledger's pay_status reads, so the two views agree.
   const settlementPaid = s.state === 'completed'
+  // Per-day payout state: each processing day can be paid on its own from its
+  // report card. per_day_available is false only when a day nets ≤ 0 (then the
+  // whole settlement is paid as one unit instead).
+  const paidByDay = new Map((dayPay?.days ?? []).map((d) => [d.day, d]))
+  const perDayAvailable = dayPay?.per_day_available ?? false
+  const daysPaid = dayPay?.days_paid ?? 0
+  const daysTotal = dayPay?.days_total ?? days.length
+  const remainingPayout = (dayPay?.days ?? []).filter((d) => !d.paid).reduce((a, d) => a + d.payout_minor, 0)
 
   useEffect(() => {
     if (days.length > 0 && !days.some((d) => d.date === selectedDate)) {
@@ -624,15 +679,17 @@ function DailyView({ days, loading, s, items, baseName, canConfirm, onConfirm }:
           <div className="label">Payout status</div>
           <div className="value">
             <span className={`pay-pill ${settlementPaid ? 'paid' : 'in_settlement'}`}>
-              {settlementPaid ? 'Paid' : 'Pending payout'}
+              {settlementPaid ? 'Paid' : daysPaid > 0 ? `${fmtInt(daysPaid)}/${fmtInt(daysTotal)} days paid` : 'Pending payout'}
             </span>
           </div>
           <div className="dim small">
             {settlementPaid
-              ? `all ${fmtInt(days.length)} days paid · total ${fmtMoney(payout, ccy)}`
-              : `${fmtInt(days.length)} days awaiting one payout of ${fmtMoney(payout, ccy)}`}
+              ? `all ${fmtInt(daysTotal)} days paid · total ${fmtMoney(payout, ccy)}`
+              : perDayAvailable
+                ? `confirm each day below · ${fmtMoney(remainingPayout, ccy)} remaining`
+                : `${fmtInt(daysTotal)} days awaiting one payout of ${fmtMoney(payout, ccy)}`}
           </div>
-          {canConfirm && (
+          {canConfirm && !perDayAvailable && (
             <button className="btn primary" style={{ marginTop: 12, alignSelf: 'flex-start' }} onClick={onConfirm}>
               ✓ Confirm payout
             </button>
@@ -660,7 +717,7 @@ function DailyView({ days, loading, s, items, baseName, canConfirm, onConfirm }:
                   </span>
                   <span className="daily-day-amount">
                     {fmtMoney(d.payout_minor, ccy)}
-                    {settlementPaid && <span className="chip green">Paid</span>}
+                    {(settlementPaid || paidByDay.get(d.date)?.paid) && <span className="chip green">Paid</span>}
                   </span>
                 </button>
               )
@@ -677,7 +734,10 @@ function DailyView({ days, loading, s, items, baseName, canConfirm, onConfirm }:
           merchantName={s.merchant_name}
           windowStart={s.window_start}
           windowEnd={s.window_end}
-          paid={settlementPaid}
+          paid={settlementPaid || (paidByDay.get(selected.date)?.paid ?? false)}
+          canConfirmDay={canConfirm && perDayAvailable && !(paidByDay.get(selected.date)?.paid ?? false)}
+          confirming={confirming}
+          onConfirmDay={() => onConfirmDay(selected.date)}
         />
       </div>
     </div>
@@ -694,6 +754,9 @@ function DailyStatement({
   windowStart,
   windowEnd,
   paid,
+  canConfirmDay,
+  confirming,
+  onConfirmDay,
 }: {
   day: SettlementDayRow
   dayItems: SettlementLineItem[]
@@ -704,6 +767,9 @@ function DailyStatement({
   windowStart: string
   windowEnd: string
   paid: boolean
+  canConfirmDay: boolean
+  confirming: boolean
+  onConfirmDay: () => void
 }) {
   const settlementFeeDetail = basisLabel(percentBasis(feeSchedule?.settlement_fee_bps))
   const txnBase = `${baseName}-${day.date}-transactions`
@@ -746,9 +812,16 @@ function DailyStatement({
             </span>
             <div className="dim small" style={{ marginTop: 6 }}>
               {paid
-                ? 'settled in this settlement’s payout'
-                : 'paid when this settlement is completed'}
+                ? 'this day’s payout has been posted'
+                : canConfirmDay
+                  ? 'confirm to pay out just this day'
+                  : 'paid when this settlement is completed'}
             </div>
+            {canConfirmDay && (
+              <button className="btn primary sm" style={{ marginTop: 10 }} disabled={confirming} onClick={onConfirmDay}>
+                ✓ Confirm payout
+              </button>
+            )}
           </div>
         </div>
       </div>

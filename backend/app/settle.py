@@ -498,6 +498,111 @@ def complete(conn: psycopg.Connection, settlement_id: int) -> dict:
         return {"settlement_id": settlement_id, "state": "completed"}
 
 
+def day_payouts(conn: psycopg.Connection, settlement_id: int) -> dict:
+    """Per-processing-day payout breakdown for a settlement, with paid status.
+
+    Each day's payout = that day's payable subtotal (Σ settlement_items delta)
+    minus its share of the once-per-settlement settlement fee, allocated
+    proportionally with the remainder on the last positive day — the SAME
+    allocation the UI shows, so the number confirmed equals the number displayed.
+    The day payouts sum exactly to the settlement's net_payout_minor.
+    """
+    cur = conn.cursor()
+    cur.execute("SELECT merchant_id, currency, breakdown, net_payout_minor, state "
+                "FROM settlements WHERE id=%s", (settlement_id,))
+    s = cur.fetchone()
+    if s is None:
+        raise SettlementError("not_found", "settlement not found")
+    fee = int((s["breakdown"] or {}).get("settlement_fee_minor", 0))
+    cur.execute(
+        """SELECT e.occurred_at::date AS day, SUM(si.payable_delta_minor) AS subtotal
+             FROM settlement_items si JOIN ledger_events e ON e.id = si.event_id
+            WHERE si.settlement_id = %s GROUP BY 1 ORDER BY 1""",
+        (settlement_id,),
+    )
+    rows = [{"day": r["day"], "subtotal": int(r["subtotal"])} for r in cur.fetchall()]
+    bases = [max(r["subtotal"], 0) for r in rows]
+    total_base = sum(bases)
+    allocs = [(fee * b) // total_base if total_base > 0 else 0 for b in bases]
+    if total_base > 0:
+        last_pos = max((i for i, b in enumerate(bases) if b > 0), default=-1)
+        if last_pos >= 0:
+            allocs[last_pos] += fee - sum(allocs)
+
+    cur.execute("SELECT day, payout_minor, payout_reference, paid_at "
+                "FROM settlement_day_payouts WHERE settlement_id=%s", (settlement_id,))
+    paid = {r["day"].isoformat(): r for r in cur.fetchall()}
+
+    days = []
+    for r, a in zip(rows, allocs):
+        iso = r["day"].isoformat()
+        p = paid.get(iso)
+        days.append({
+            "day": iso, "subtotal_minor": r["subtotal"], "fee_minor": a,
+            "payout_minor": r["subtotal"] - a, "paid": p is not None,
+            "payout_reference": p["payout_reference"] if p else None,
+            "paid_at": p["paid_at"].isoformat() if p else None,
+        })
+    per_day_available = all(d["payout_minor"] > 0 for d in days) and len(days) > 0
+    return {"currency": s["currency"], "state": s["state"],
+            "net_payout_minor": int(s["net_payout_minor"]),
+            "days_total": len(days), "days_paid": sum(1 for d in days if d["paid"]),
+            "per_day_available": per_day_available, "days": days}
+
+
+def complete_day(conn: psycopg.Connection, settlement_id: int, day: str) -> dict:
+    """Pay out a single processing day of a settlement (partial completion).
+
+    Posts a settlement_completed event for that day's payout only, records it, and
+    flips the whole settlement to 'completed' once every day has been paid."""
+    with conn.transaction():
+        cur = conn.cursor()
+        cur.execute("SELECT * FROM settlements WHERE id=%s FOR UPDATE", (settlement_id,))
+        s = cur.fetchone()
+        if s is None:
+            raise SettlementError("not_found", "settlement not found")
+        if s["state"] != "generated":
+            raise SettlementError("invalid_state", f"cannot pay a day from '{s['state']}'")
+        breakdown = day_payouts(conn, settlement_id)
+        if not breakdown["per_day_available"]:
+            raise SettlementError(
+                "per_day_unavailable",
+                "this settlement has a day that nets ≤ 0, so it can't be paid day by "
+                "day — use Confirm payout for the whole settlement instead.")
+        row = next((d for d in breakdown["days"] if d["day"] == day), None)
+        if row is None:
+            raise SettlementError("not_found", f"no settlement activity on {day}")
+        if row["paid"]:
+            return {"settlement_id": settlement_id, "day": day, "already_paid": True}
+        payout = int(row["payout_minor"])
+        event_id, _ = post_event(
+            conn, event_type="settlement_completed", source_type="settlement_day",
+            source_id=f"{settlement_id}:{day}", merchant_id=s["merchant_id"],
+            currency=s["currency"], occurred_at=datetime.now(timezone.utc),
+            legs=[Leg("settlement_payable", s["merchant_id"], DEBIT, payout),
+                  Leg("clearing", None, CREDIT, payout)],
+            metadata={"settlement_id": settlement_id, "day": day},
+        )
+        ref = f"PO-{day.replace('-', '')}-{settlement_id}"
+        cur.execute(
+            "INSERT INTO settlement_day_payouts (settlement_id, day, payout_minor, "
+            "event_id, payout_reference) VALUES (%s,%s,%s,%s,%s)",
+            (settlement_id, day, payout, event_id, ref),
+        )
+        after = day_payouts(conn, settlement_id)
+        fully = after["days_paid"] == after["days_total"]
+        if fully:
+            cur.execute(
+                "UPDATE settlements SET state='completed', completed_event_id=%s, "
+                "settled_at=COALESCE(settled_at, now()), "
+                "payout_reference=COALESCE(payout_reference,%s) WHERE id=%s",
+                (event_id, ref, settlement_id),
+            )
+        return {"settlement_id": settlement_id, "day": day, "payout_minor": payout,
+                "payout_reference": ref, "completed": fully,
+                "days_paid": after["days_paid"], "days_total": after["days_total"]}
+
+
 def cancel(conn: psycopg.Connection, settlement_id: int) -> dict:
     """Void a *generated* (not yet paid) settlement.
 
@@ -515,6 +620,12 @@ def cancel(conn: psycopg.Connection, settlement_id: int) -> dict:
             raise SettlementError("invalid_state",
                                   f"cannot cancel from '{s['state']}' (only a generated, "
                                   "not-yet-paid settlement can be cancelled)")
+        cur.execute("SELECT COUNT(*) AS n FROM settlement_day_payouts WHERE settlement_id=%s",
+                    (settlement_id,))
+        if cur.fetchone()["n"] > 0:
+            raise SettlementError("partially_paid",
+                                  "some days of this settlement have already been paid — "
+                                  "it can no longer be cancelled")
         gen_eid = s["generated_event_id"]
         if gen_eid is not None:
             # mirror every leg of the generation event to unwind it exactly

@@ -284,6 +284,26 @@ export interface GenerateSkipped {
   reason: string
 }
 
+export interface DayPayout {
+  day: string
+  subtotal_minor: number
+  fee_minor: number
+  payout_minor: number
+  paid: boolean
+  payout_reference: string | null
+  paid_at: string | null
+}
+
+export interface DayPayouts {
+  currency: string
+  state: string
+  net_payout_minor: number
+  days_total: number
+  days_paid: number
+  per_day_available: boolean
+  days: DayPayout[]
+}
+
 export interface PerDayGenResult {
   currency: string
   days_generated: number

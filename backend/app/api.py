@@ -200,12 +200,8 @@ def dashboard(user: dict = Depends(current_user)):
                    COUNT(*) FILTER (WHERE state='completed') AS completed
               FROM settlements s WHERE TRUE {"AND s.merchant_id=%(mid)s" if mid else ""}""", p)
         st = cur.fetchone()
-        cur.execute(f"""
-            SELECT currency, SUM(net_payout_minor) AS total FROM settlements s
-             WHERE state='completed' {"AND s.merchant_id=%(mid)s" if mid else ""}
-             GROUP BY currency""", p)
-        paid_out = [{"currency": r["currency"], "amount_minor": int(r["total"])}
-                    for r in cur.fetchall()]
+        paid_out = [{"currency": ccy, "amount_minor": amt}
+                    for ccy, amt in sorted(_paid_out_by_currency(cur, mid).items())]
 
         cur.execute("SELECT COUNT(*) AS n FROM merchants")
         mc = cur.fetchone()["n"]
@@ -253,6 +249,25 @@ def _integrity_summary(cur) -> dict:
 
 
 # ---------------------------------------------------------------- merchants
+def _paid_out_by_currency(cur, merchant_id: int | None) -> dict:
+    """Money actually paid out to a merchant, per currency, derived from the ledger.
+
+    Sums the settlement_payable debits of settlement_completed events, so it counts
+    both whole-settlement completions AND per-day partial payouts consistently.
+    """
+    where = "AND a.merchant_id = %(mid)s" if merchant_id else ""
+    cur.execute(
+        f"""SELECT a.currency, COALESCE(SUM(le.amount_minor), 0) AS total
+              FROM ledger_events e
+              JOIN ledger_entries le ON le.event_id = e.id AND le.direction = 'debit'
+              JOIN accounts a ON a.id = le.account_id AND a.account_type = 'settlement_payable'
+             WHERE e.event_type = 'settlement_completed' {where}
+             GROUP BY a.currency""",
+        {"mid": merchant_id},
+    )
+    return {r["currency"]: int(r["total"]) for r in cur.fetchall()}
+
+
 def _merchant_item(cur, m) -> dict:
     cur.execute("""
         SELECT a.account_type, a.currency, b.balance_minor
@@ -268,15 +283,11 @@ def _merchant_item(cur, m) -> dict:
         if key:
             c[key] = int(r["balance_minor"])
 
-    cur.execute("""
-        SELECT currency, SUM(net_payout_minor) AS total
-          FROM settlements WHERE merchant_id=%s AND state='completed'
-         GROUP BY currency""", (m["id"],))
-    for r in cur.fetchall():
-        c = bal.setdefault(r["currency"], {"currency": r["currency"], "payable_minor": 0,
-                                           "reserve_minor": 0, "in_settlement_minor": 0,
-                                           "paid_minor": 0})
-        c["paid_minor"] = int(r["total"] or 0)
+    for currency, total in _paid_out_by_currency(cur, m["id"]).items():
+        c = bal.setdefault(currency, {"currency": currency, "payable_minor": 0,
+                                      "reserve_minor": 0, "in_settlement_minor": 0,
+                                      "paid_minor": 0})
+        c["paid_minor"] = total
 
     cur.execute("""
         SELECT currency, SUM(captured_minor) AS s, COUNT(*) AS n,
@@ -607,17 +618,21 @@ def daily_settlement(muuid: str, currency: str | None = None,
             if str(r["d"]) in days:
                 days[str(r["d"])]["reserve_minor"] = int(r["delta"])
 
-        # 4. settlement linkage per day → status
+        # 4. settlement linkage per day → status. A day counts as paid when its
+        #    settlement is completed OR the day itself has a per-day payout
+        #    (settlement_day_payouts), so partial per-day payouts show as paid.
         cur.execute(f"""
             SELECT e.occurred_at::date AS d,
                    COUNT(*) AS n,
                    COUNT(si.event_id) AS n_settled,
-                   COUNT(*) FILTER (WHERE s.state='completed') AS n_completed,
+                   COUNT(*) FILTER (WHERE s.state='completed' OR sdp.settlement_id IS NOT NULL) AS n_paid,
                    COUNT(*) FILTER (WHERE s.state='generated') AS n_generated,
                    (ARRAY_AGG(s.settlement_uuid) FILTER (WHERE s.settlement_uuid IS NOT NULL))[1] AS suuid
               FROM ledger_events e
               LEFT JOIN settlement_items si ON si.event_id=e.id
               LEFT JOIN settlements s ON s.id=si.settlement_id
+              LEFT JOIN settlement_day_payouts sdp
+                     ON sdp.settlement_id=s.id AND sdp.day=e.occurred_at::date
              WHERE e.merchant_id=%(mid)s AND e.currency=%(ccy)s AND e.source_txn_id IS NOT NULL
                AND e.event_type = ANY(%(types)s){rng.replace('occurred_at','e.occurred_at')}
              GROUP BY 1""", {**p, "types": list(settle_mod.CANDIDATE_TYPES)})
@@ -626,14 +641,14 @@ def daily_settlement(muuid: str, currency: str | None = None,
             if d not in days:
                 continue
             n, n_settled = int(r["n"]), int(r["n_settled"])
-            n_completed, n_generated = int(r["n_completed"]), int(r["n_generated"])
+            n_paid, n_generated = int(r["n_paid"]), int(r["n_generated"])
             if n_settled == 0:
                 status = "pending"
             elif n_settled < n:
                 status = "partial"
-            elif n_completed == n:
+            elif n_paid == n:
                 status = "paid"
-            elif n_generated > 0 and n_completed == 0:
+            elif n_generated > 0:
                 status = "in_settlement"
             else:
                 status = "partial"
@@ -899,6 +914,35 @@ def complete_settlement(suuid: str, background: BackgroundTasks,
         return settlement_detail(suuid, user)
 
 
+@app.get("/api/settlements/{suuid}/day-payouts")
+def settlement_day_payouts(suuid: str, user: dict = Depends(current_user)):
+    """Per-day payout breakdown + paid status for a settlement (admin + owning merchant)."""
+    with get_pool().connection() as conn:
+        cur = conn.cursor()
+        cur.execute("SELECT id, merchant_id FROM settlements WHERE settlement_uuid=%s", (suuid,))
+        s = cur.fetchone()
+        if s is None or (user["role"] == "merchant" and s["merchant_id"] != user["merchant_id"]):
+            err(404, "not_found", "settlement not found")
+        return settle_mod.day_payouts(conn, s["id"])
+
+
+@app.post("/api/settlements/{suuid}/days/{day}/complete")
+def complete_settlement_day(suuid: str, day: str, user: dict = Depends(require_admin)):
+    """Pay out one processing day of a settlement (partial completion)."""
+    with get_pool().connection() as conn:
+        cur = conn.cursor()
+        cur.execute("SELECT id FROM settlements WHERE settlement_uuid=%s", (suuid,))
+        s = cur.fetchone()
+        if s is None:
+            err(404, "not_found", "settlement not found")
+        try:
+            res = settle_mod.complete_day(conn, s["id"], day)
+        except settle_mod.SettlementError as e:
+            err(409, e.code, e.message)
+        conn.commit()
+        return res
+
+
 @app.post("/api/settlements/{suuid}/cancel")
 def cancel_settlement(suuid: str, user: dict = Depends(require_admin)):
     """Void a generated (not-yet-paid) settlement: reverse the generation and
@@ -1141,10 +1185,16 @@ def _merchant_balance_sums(cur, mid_filter_sql: str, p: dict) -> dict:
 
 
 def _merchant_paid_out(cur, mid_filter_sql: str, p: dict) -> dict:
+    """Paid-out per merchant/currency from the ledger (settlement_completed events),
+    so whole-settlement and per-day partial payouts both count."""
+    where = mid_filter_sql.replace("merchant_id", "a.merchant_id")
     cur.execute(f"""
-        SELECT merchant_id, currency, SUM(net_payout_minor) AS total
-          FROM settlements WHERE state='completed' {mid_filter_sql}
-         GROUP BY merchant_id, currency""", p)
+        SELECT a.merchant_id, a.currency, COALESCE(SUM(le.amount_minor),0) AS total
+          FROM ledger_events e
+          JOIN ledger_entries le ON le.event_id=e.id AND le.direction='debit'
+          JOIN accounts a ON a.id=le.account_id AND a.account_type='settlement_payable'
+         WHERE e.event_type='settlement_completed' {where}
+         GROUP BY a.merchant_id, a.currency""", p)
     out: dict = {}
     for r in cur.fetchall():
         out.setdefault(r["merchant_id"], []).append(
@@ -1349,17 +1399,19 @@ def merchant_ledger_statement(muuid: str, user: dict = Depends(current_user),
                 SELECT e.occurred_at::date AS processed_date, e.currency,
                        COUNT(*) AS cap_n,
                        COUNT(si.event_id) AS n_settled,
-                       COUNT(*) FILTER (WHERE s.state='completed') AS n_completed
+                       COUNT(*) FILTER (WHERE s.state='completed' OR sdp.settlement_id IS NOT NULL) AS n_paid
                   FROM ledger_events e
                   LEFT JOIN settlement_items si ON si.event_id=e.id
                   LEFT JOIN settlements s ON s.id=si.settlement_id
+                  LEFT JOIN settlement_day_payouts sdp
+                         ON sdp.settlement_id=s.id AND sdp.day=e.occurred_at::date
                  WHERE {w} AND e.event_type = ANY(%(ctypes)s) AND e.source_txn_id IS NOT NULL
                  GROUP BY 1, 2
             ), joined AS (
                 SELECT d.*,
                        CASE
                          WHEN COALESCE(ss.cap_n, 0) = 0 THEN 'na'
-                         WHEN ss.n_completed = ss.cap_n THEN 'paid'
+                         WHEN ss.n_paid = ss.cap_n THEN 'paid'
                          WHEN ss.n_settled = ss.cap_n THEN 'in_settlement'
                          ELSE 'unpaid'
                        END AS pay_status
