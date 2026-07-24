@@ -4,7 +4,7 @@ import { api, ApiError, getUser } from '../lib/api'
 import { useApi } from '../lib/useApi'
 import type { SettlementDetail, SettlementLineItem } from '../lib/types'
 import { fmtDate, fmtDateTime, fmtInt, fmtMoney, fmtMoneySigned } from '../lib/money'
-import { LoadingBlock, StatusChip, toastError, toastSuccess } from '../components/ui'
+import { LoadingBlock, Modal, StatusChip, toastError, toastSuccess } from '../components/ui'
 import { downloadCSV, downloadExcel, printToPDF, toMajor } from '../lib/export'
 
 type View = 'statement' | 'daily' | 'lines'
@@ -244,15 +244,17 @@ export default function SettlementDetailPage() {
   const lines = useApi(() => api<{ items: SettlementLineItem[] }>(`/api/settlements/${uuid}/items`), [uuid])
   const [view, setView] = useState<View>('statement')
   const [completing, setCompleting] = useState(false)
+  const [showConfirm, setShowConfirm] = useState(false)
 
   const markCompleted = async () => {
     setCompleting(true)
     try {
       await api(`/api/settlements/${uuid}/complete`, { method: 'POST' })
-      toastSuccess('Settlement marked as completed — payout posted, confirmation emailed')
+      toastSuccess('Payout confirmed — posted to the ledger, merchant balances updated, confirmation emailed')
+      setShowConfirm(false)
       reload()
     } catch (e) {
-      toastError(e instanceof ApiError ? e.message : 'Failed to complete settlement')
+      toastError(e instanceof ApiError ? e.message : 'Failed to confirm payout')
     } finally {
       setCompleting(false)
     }
@@ -431,8 +433,8 @@ export default function SettlementDetailPage() {
           {isAdmin && (s.state === 'generated' || s.state === 'completed') && (
             <div className="head-actions">
               {s.state === 'generated' ? (
-                <button className="btn" onClick={() => void markCompleted()} disabled={completing}>
-                  {completing ? 'Posting payout…' : '✓ Mark completed'}
+                <button className="btn primary" onClick={() => setShowConfirm(true)} disabled={completing}>
+                  {completing ? 'Posting payout…' : '✓ Confirm payout'}
                 </button>
               ) : (
                 <>
@@ -477,20 +479,56 @@ export default function SettlementDetailPage() {
       {view === 'statement' ? (
         <StatementView s={s} counts={counts} />
       ) : view === 'daily' ? (
-        <DailyView days={days} loading={lines.loading} s={s} items={items} baseName={base} />
+        <DailyView
+          days={days}
+          loading={lines.loading}
+          s={s}
+          items={items}
+          baseName={base}
+          canConfirm={isAdmin && s.state === 'generated'}
+          onConfirm={() => setShowConfirm(true)}
+        />
       ) : (
         <LinesView items={items} loading={lines.loading} ccy={ccy} />
+      )}
+
+      {showConfirm && (
+        <Modal
+          title="Confirm payout"
+          onClose={() => (completing ? null : setShowConfirm(false))}
+          footer={
+            <>
+              <button className="btn" onClick={() => setShowConfirm(false)} disabled={completing}>Cancel</button>
+              <button className="btn primary" onClick={() => void markCompleted()} disabled={completing}>
+                {completing ? 'Posting payout…' : `Confirm & pay ${fmtMoney(b.net_payout_minor, ccy)}`}
+              </button>
+            </>
+          }
+        >
+          <div>
+            Confirm the payout of <b>{fmtMoney(b.net_payout_minor, ccy)}</b> to <b>{s.merchant_name}</b> for
+            the window {fmtDate(s.window_start)} → {fmtDate(s.window_end)}.
+          </div>
+          <ul className="dim small" style={{ margin: '10px 0 0', paddingLeft: 18, lineHeight: 1.7 }}>
+            <li>Posts the payout to the ledger (settlement → paid; money leaves the gateway clearing account).</li>
+            <li>Marks this settlement <b>completed</b> — it moves from “In settlement” to “Paid” on the merchant’s balances and daily records.</li>
+            <li>Emails the payout confirmation to the merchant (if an email is on file).</li>
+          </ul>
+          <div className="dim small" style={{ marginTop: 10 }}>This posts an append-only ledger event and cannot be undone from the UI.</div>
+        </Modal>
       )}
     </div>
   )
 }
 
-function DailyView({ days, loading, s, items, baseName }: {
+function DailyView({ days, loading, s, items, baseName, canConfirm, onConfirm }: {
   days: SettlementDayRow[]
   loading: boolean
   s: SettlementDetail
   items: SettlementLineItem[]
   baseName: string
+  canConfirm: boolean
+  onConfirm: () => void
 }) {
   const ccy = s.currency
   const fs = s.fee_schedule
@@ -553,6 +591,11 @@ function DailyView({ days, loading, s, items, baseName }: {
               ? `all ${fmtInt(days.length)} days paid · total ${fmtMoney(payout, ccy)}`
               : `${fmtInt(days.length)} days awaiting one payout of ${fmtMoney(payout, ccy)}`}
           </div>
+          {canConfirm && (
+            <button className="btn primary sm" style={{ marginTop: 10, alignSelf: 'flex-start' }} onClick={onConfirm}>
+              ✓ Confirm payout
+            </button>
+          )}
         </div>
       </div>
 
