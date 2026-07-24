@@ -209,6 +209,34 @@ function buildDayRows(items: SettlementLineItem[], settlementFeeMinor: number): 
   return rows
 }
 
+const LINE_HEADER = [
+  'Date (UTC)', 'Type', 'Reference', 'Brand', 'Last 4', 'Status',
+  'Gross', 'MDR', 'Approved fee', 'Declined fee', 'Refund fee', 'Chargeback fee', 'Reserve', 'Net',
+]
+
+/** Per-transaction rows (header + one row per line item) for CSV/Excel export. */
+function lineItemRows(items: SettlementLineItem[], ccy: string): (string | number)[][] {
+  return [
+    LINE_HEADER,
+    ...items.map((it) => [
+      fmtDateTime(it.occurred_at),
+      typeLabel(it.type),
+      it.reference,
+      it.brand,
+      it.last_four,
+      it.status,
+      toMajor(it.gross_minor, ccy),
+      toMajor(it.mdr_minor, ccy),
+      toMajor(it.approved_fee_minor, ccy),
+      toMajor(it.declined_fee_minor, ccy),
+      toMajor(it.refund_fee_minor, ccy),
+      toMajor(it.chargeback_fee_minor, ccy),
+      toMajor(it.reserve_minor, ccy),
+      toMajor(it.net_minor, ccy),
+    ]),
+  ]
+}
+
 export default function SettlementDetailPage() {
   const { uuid } = useParams<{ uuid: string }>()
   const isAdmin = getUser()?.role === 'admin'
@@ -304,29 +332,7 @@ export default function SettlementDetailPage() {
     ['NET PAYOUT', '', toMajor(b.net_payout_minor, ccy)],
   ]
 
-  const LINE_HEADER = [
-    'Date (UTC)', 'Type', 'Reference', 'Brand', 'Last 4', 'Status',
-    'Gross', 'MDR', 'Approved fee', 'Declined fee', 'Refund fee', 'Chargeback fee', 'Reserve', 'Net',
-  ]
-  const lineRows = (): (string | number)[][] => [
-    LINE_HEADER,
-    ...items.map((it) => [
-      fmtDateTime(it.occurred_at),
-      typeLabel(it.type),
-      it.reference,
-      it.brand,
-      it.last_four,
-      it.status,
-      toMajor(it.gross_minor, ccy),
-      toMajor(it.mdr_minor, ccy),
-      toMajor(it.approved_fee_minor, ccy),
-      toMajor(it.declined_fee_minor, ccy),
-      toMajor(it.refund_fee_minor, ccy),
-      toMajor(it.chargeback_fee_minor, ccy),
-      toMajor(it.reserve_minor, ccy),
-      toMajor(it.net_minor, ccy),
-    ]),
-  ]
+  const lineRows = (): (string | number)[][] => lineItemRows(items, ccy)
 
   const dayRows = (): (string | number)[][] => [
     [
@@ -471,7 +477,7 @@ export default function SettlementDetailPage() {
       {view === 'statement' ? (
         <StatementView s={s} counts={counts} />
       ) : view === 'daily' ? (
-        <DailyView days={days} loading={lines.loading} s={s} />
+        <DailyView days={days} loading={lines.loading} s={s} items={items} baseName={base} />
       ) : (
         <LinesView items={items} loading={lines.loading} ccy={ccy} />
       )}
@@ -479,7 +485,13 @@ export default function SettlementDetailPage() {
   )
 }
 
-function DailyView({ days, loading, s }: { days: SettlementDayRow[]; loading: boolean; s: SettlementDetail }) {
+function DailyView({ days, loading, s, items, baseName }: {
+  days: SettlementDayRow[]
+  loading: boolean
+  s: SettlementDetail
+  items: SettlementLineItem[]
+  baseName: string
+}) {
   const ccy = s.currency
   const fs = s.fee_schedule
   const [selectedDate, setSelectedDate] = useState('')
@@ -509,6 +521,7 @@ function DailyView({ days, loading, s }: { days: SettlementDayRow[]; loading: bo
   const subtotal = sum('net_minor')
   const payout = sum('payout_minor')
   const selected = days.find((d) => d.date === selectedDate) ?? days[0]
+  const selectedItems = items.filter((it) => dayKey(it.occurred_at) === selected.date)
 
   return (
     <div className="stack">
@@ -573,6 +586,8 @@ function DailyView({ days, loading, s }: { days: SettlementDayRow[]; loading: bo
 
         <DailyStatement
           day={selected}
+          dayItems={selectedItems}
+          baseName={baseName}
           ccy={ccy}
           feeSchedule={fs}
           merchantName={s.merchant_name}
@@ -587,6 +602,8 @@ function DailyView({ days, loading, s }: { days: SettlementDayRow[]; loading: bo
 
 function DailyStatement({
   day,
+  dayItems,
+  baseName,
   ccy,
   feeSchedule,
   merchantName,
@@ -595,6 +612,8 @@ function DailyStatement({
   paid,
 }: {
   day: SettlementDayRow
+  dayItems: SettlementLineItem[]
+  baseName: string
   ccy: string
   feeSchedule: SettlementDetail['fee_schedule']
   merchantName: string
@@ -603,6 +622,9 @@ function DailyStatement({
   paid: boolean
 }) {
   const settlementFeeDetail = basisLabel(percentBasis(feeSchedule?.settlement_fee_bps))
+  const txnBase = `${baseName}-${day.date}-transactions`
+  const exportDayCSV = () => downloadCSV(`${txnBase}.csv`, lineItemRows(dayItems, ccy))
+  const exportDayExcel = () => downloadExcel(`${txnBase}.xls`, day.date, lineItemRows(dayItems, ccy))
 
   return (
     <div className="card statement daily-statement">
@@ -615,6 +637,12 @@ function DailyStatement({
           </div>
           <div className="win num">
             Parent window {fmtDate(windowStart)} → {fmtDate(windowEnd)}
+          </div>
+          <div className="export-group" data-print="hide" style={{ marginTop: 10 }}>
+            <span className="export-label">This day’s transactions</span>
+            <button className="export-btn" onClick={exportDayCSV} disabled={!dayItems.length}>CSV</button>
+            <button className="export-btn" onClick={exportDayExcel} disabled={!dayItems.length}>Excel</button>
+            <span className="dim small">{fmtInt(dayItems.length)} txns</span>
           </div>
         </div>
         <div className="daily-approve-box">
