@@ -852,6 +852,25 @@ def generate_settlement(body: GenerateBody, user: dict = Depends(require_admin))
         return settlement_detail(suuid, user)
 
 
+@app.post("/api/settlements/generate-per-day")
+def generate_per_day_settlements(body: GenerateBody, user: dict = Depends(require_admin)):
+    """Generate ONE settlement per processing day in the window, so each day can
+    be confirmed and paid independently from its own statement."""
+    with get_pool().connection() as conn:
+        cur = conn.cursor()
+        cur.execute("SELECT id FROM merchants WHERE merchant_uuid=%s", (body.merchant_uuid,))
+        m = cur.fetchone()
+        if m is None:
+            err(404, "not_found", "merchant not found")
+        ws = _window_start(body.window_start)
+        we = _window_end(body.window_end)
+        summary = settle_mod.generate_per_day(
+            conn, merchant_id=m["id"], currency=body.currency.upper(),
+            window_start=ws, window_end=we, generated_by=user["sub"])
+        conn.commit()
+        return summary
+
+
 def _email_settlement_bg(settlement_id: int) -> None:
     """Send a payout-confirmation email on its own connection (background task)."""
     try:

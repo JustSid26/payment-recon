@@ -7,7 +7,7 @@ is <= 0, nothing links and nothing posts.
 """
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import datetime, time, timezone
 
 import psycopg
 
@@ -176,6 +176,54 @@ def generate(conn: psycopg.Connection, *, merchant_id: int, currency: str,
                 "VALUES (%s,'settlement_fee',%s,%s,%s)", (merchant_id, currency, sf, event_id),
             )
         return {"settlement_id": sid}
+
+
+def generate_per_day(conn: psycopg.Connection, *, merchant_id: int, currency: str,
+                     window_start: datetime, window_end: datetime,
+                     cutoff: datetime | None = None, generated_by: str = "admin") -> dict:
+    """Generate ONE settlement per processing day in [window_start, window_end].
+
+    Each day becomes its own settlement (scoped by occurred_at), so it can be
+    confirmed and paid on its own. Days with nothing matured to settle are skipped.
+    Returns a per-day summary.
+    """
+    cutoff = cutoff or datetime.now(timezone.utc)
+    cur = conn.cursor()
+    cur.execute(
+        """SELECT DISTINCT e.occurred_at::date AS d
+             FROM ledger_events e
+             JOIN ledger_entries le ON le.event_id = e.id
+             JOIN accounts a ON a.id = le.account_id
+                            AND a.account_type = 'merchant_payable'
+                            AND a.merchant_id = %(mid)s
+             LEFT JOIN settlement_items si ON si.event_id = e.id
+            WHERE e.merchant_id = %(mid)s AND e.currency = %(ccy)s
+              AND e.event_type = ANY(%(types)s)
+              AND e.settle_after <= %(cutoff)s
+              AND si.event_id IS NULL
+              AND e.occurred_at >= %(ws)s AND e.occurred_at <= %(we)s
+            ORDER BY d""",
+        {"mid": merchant_id, "ccy": currency, "types": list(CANDIDATE_TYPES),
+         "cutoff": cutoff, "ws": window_start, "we": window_end},
+    )
+    days = [r["d"] for r in cur.fetchall()]
+    results, generated, skipped = [], 0, 0
+    for d in days:
+        ds = datetime.combine(d, time(0, 0), tzinfo=timezone.utc)
+        de = datetime.combine(d, time(23, 59, 59, 999999), tzinfo=timezone.utc)
+        res = generate(conn, merchant_id=merchant_id, currency=currency,
+                       window_start=ds, window_end=de, cutoff=cutoff,
+                       scope_by_occurred=True, generated_by=generated_by)
+        if res.get("skipped"):
+            skipped += 1
+            results.append({"date": d.isoformat(), "status": "skipped", "reason": res["reason"]})
+        else:
+            generated += 1
+            results.append({"date": d.isoformat(), "status": "generated",
+                            "settlement_id": res["settlement_id"],
+                            "existing": bool(res.get("existing"))})
+    return {"currency": currency, "days_generated": generated,
+            "days_skipped": skipped, "results": results}
 
 
 def _breakdown(cur, event_ids: list[int], merchant_id: int, currency: str,

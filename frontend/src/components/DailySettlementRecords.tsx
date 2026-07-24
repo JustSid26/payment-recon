@@ -1,8 +1,8 @@
 import { useMemo, useState } from 'react'
-import { Link, useNavigate } from 'react-router-dom'
-import { api, ApiError, getUser } from '../lib/api'
+import { Link } from 'react-router-dom'
+import { api, ApiError } from '../lib/api'
 import { useApi } from '../lib/useApi'
-import type { DailySettlementResp, DailySettlementRow, GenerateSkipped, SettlementDetail, SettlementLineItem } from '../lib/types'
+import type { DailySettlementResp, DailySettlementRow, SettlementLineItem } from '../lib/types'
 import { fmtDate, fmtDateTime, fmtInt, fmtMoney } from '../lib/money'
 import { DataTable, EmptyState, LoadingBlock, Modal, StatusChip, toastError, toastSuccess, type Column } from './ui'
 import { downloadCSV, downloadExcel, downloadExcelWorkbook, printToPDF, printModal, toMajor } from '../lib/export'
@@ -89,26 +89,20 @@ function VolumeCell({ volume, approved, declined, onClick }: {
 export default function DailySettlementRecords({
   merchantUuid,
   merchantName = 'merchant',
-  canPayout = false,
 }: {
   merchantUuid: string
   merchantName?: string
-  /** Show per-day Settle/Confirm-payout actions. Only the Settlements section
-   *  enables this; the merchant page and ledger stay status-only (view). */
-  canPayout?: boolean
 }) {
-  const isAdmin = getUser()?.role === 'admin'
-  const showPayout = isAdmin && canPayout
-  const navigate = useNavigate()
+  // Read-only per-day view. Payouts are generated/confirmed per day from the
+  // settlement statement, never here — this page (and the ledger) show status only.
   const [ccy, setCcy] = useState('')
   const [dateFrom, setDateFrom] = useState('')
   const [dateTo, setDateTo] = useState('')
   const [openDay, setOpenDay] = useState<string | null>(null)
   const [busyDay, setBusyDay] = useState<string | null>(null)
   const [buildingBook, setBuildingBook] = useState(false)
-  const [payoutBusy, setPayoutBusy] = useState<string | null>(null)
 
-  const { data, loading, reload } = useApi(
+  const { data, loading } = useApi(
     () =>
       api<DailySettlementResp>(`/api/merchants/${merchantUuid}/daily-settlement`, {
         params: { currency: ccy || undefined, date_from: dateFrom || undefined, date_to: dateTo || undefined },
@@ -166,52 +160,6 @@ export default function DailySettlementRecords({
     } finally {
       setBuildingBook(false)
     }
-  }
-
-  // ---- per-day settlement: generate this day's settlement, then open its report
-  // to confirm the payout there (the ONLY place a payout is confirmed). We never
-  // confirm from this list — that would complete whatever settlement the day
-  // belongs to, including a lumped multi-day one.
-  const settleDay = async (date: string) => {
-    setPayoutBusy(date)
-    try {
-      const res = await api<SettlementDetail | GenerateSkipped>('/api/settlements/generate', {
-        method: 'POST',
-        body: { merchant_uuid: merchantUuid, currency, window_start: date, window_end: date },
-      })
-      if ('skipped' in res && res.skipped) {
-        toastError(`${fmtDate(date)} — ${res.reason}`)
-        reload()
-      } else {
-        toastSuccess(`${fmtDate(date)} settled — confirm the payout in the day-wise report`)
-        navigate(`/settlements/${(res as SettlementDetail).settlement_uuid}`)
-      }
-    } catch (e) {
-      toastError(e instanceof ApiError ? e.message : 'Failed to settle this day')
-    } finally {
-      setPayoutBusy(null)
-    }
-  }
-
-  const payoutCell = (r: DailySettlementRow) => {
-    if (payoutBusy === r.date) return <span className="dim small">…</span>
-    if (r.status === 'paid') return <span className="pay-pill paid">Paid</span>
-    if (r.settlement_uuid) {
-      // already in a settlement — review it; confirm happens in the report
-      return (
-        <Link to={`/settlements/${r.settlement_uuid}`} className="small" onClick={(e) => e.stopPropagation()}>
-          Review →
-        </Link>
-      )
-    }
-    if (r.status === 'pending' && r.net_payable_minor > 0) {
-      return (
-        <button className="btn sm" onClick={(e) => { e.stopPropagation(); void settleDay(r.date) }}>
-          Settle day
-        </button>
-      )
-    }
-    return <span className="dim small">—</span>
   }
 
   const cols: Column<DailySettlementRow>[] = [
@@ -279,9 +227,6 @@ export default function DailySettlementRecords({
         </button>
       ),
     },
-    ...(showPayout
-      ? ([{ key: 'payout', header: 'Payout', align: 'right', render: payoutCell }] as Column<DailySettlementRow>[])
-      : []),
   ]
 
   // ---- exports (daily table) ----

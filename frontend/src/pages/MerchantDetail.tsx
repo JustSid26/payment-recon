@@ -3,11 +3,10 @@ import { Link, useNavigate, useParams } from 'react-router-dom'
 import { api, ApiError, getUser } from '../lib/api'
 import { useApi } from '../lib/useApi'
 import type {
-  GenerateSkipped,
   MerchantDetail,
+  PerDayGenResult,
   ReserveStatement,
   Settlement,
-  SettlementDetail,
 } from '../lib/types'
 import { fmtDate, fmtInt, fmtMoney } from '../lib/money'
 import {
@@ -125,15 +124,21 @@ export default function MerchantDetailPage() {
 
   const genCurrencies = currencies.length ? currencies : ['USD', 'EUR']
 
+  // One settlement PER DAY per currency, so each day is confirmed on its own.
   const generateOne = async (currency: string): Promise<GenResult> => {
     try {
-      const res = await api<SettlementDetail | GenerateSkipped>('/api/settlements/generate', {
+      const res = await api<PerDayGenResult>('/api/settlements/generate-per-day', {
         method: 'POST',
         body: { merchant_uuid: uuid, currency, window_start: genStart, window_end: genEnd },
       })
-      if ('skipped' in res && res.skipped) return { currency, status: 'skipped', detail: res.reason }
-      const s = res as SettlementDetail
-      return { currency, status: 'generated', detail: `Net ${fmtMoney(s.breakdown.net_payout_minor, currency)}`, uuid: s.settlement_uuid }
+      if (res.days_generated === 0 && res.days_skipped === 0) {
+        return { currency, status: 'skipped', detail: 'no settleable activity in this window' }
+      }
+      if (res.days_generated === 0) {
+        return { currency, status: 'skipped', detail: `${res.days_skipped} day(s) skipped (not matured / net ≤ 0)` }
+      }
+      const skip = res.days_skipped ? ` · ${res.days_skipped} skipped` : ''
+      return { currency, status: 'generated', detail: `${res.days_generated} daily settlement${res.days_generated === 1 ? '' : 's'}${skip}` }
     } catch (e) {
       return { currency, status: 'error', detail: e instanceof ApiError ? e.message : 'failed' }
     }
@@ -148,32 +153,19 @@ export default function MerchantDetailPage() {
     setGenMsg(null)
     setGenResults(null)
 
-    // Single currency: keep the fast path — jump straight to the new settlement.
-    if (genCcy !== 'ALL') {
-      const r = await generateOne(genCcy)
-      setGenBusy(false)
-      if (r.status === 'generated' && r.uuid) {
-        toastSuccess('Settlement generated')
-        navigate(`/settlements/${r.uuid}`)
-      } else {
-        setGenMsg(r.status === 'skipped' ? `Skipped — ${r.detail}` : r.detail)
-      }
-      return
-    }
-
-    // All currencies: one settlement per currency, in sequence, then a summary.
+    const list = genCcy === 'ALL' ? genCurrencies : [genCcy]
     const results: GenResult[] = []
-    for (const c of genCurrencies) results.push(await generateOne(c))
+    for (const c of list) results.push(await generateOne(c))
     setGenResults(results)
     setGenBusy(false)
     const gen = results.filter((r) => r.status === 'generated').length
     if (gen > 0) {
-      toastSuccess(`Generated ${gen} settlement${gen === 1 ? '' : 's'} across ${genCurrencies.length} currencies`)
+      toastSuccess('Daily settlements generated — confirm each day’s payout from Settlements')
       reloadMerchant()
       settlements.reload()
       reserve.reload()
     } else {
-      setGenMsg('No settlements generated — see the per-currency results below.')
+      setGenMsg('Nothing generated — see the per-currency results below.')
     }
   }
 
@@ -462,15 +454,16 @@ export default function MerchantDetailPage() {
                   : genResults
                     ? 'Regenerate'
                     : genCcy === 'ALL'
-                      ? `Generate all (${genCurrencies.length})`
-                      : 'Generate'}
+                      ? 'Generate (all currencies)'
+                      : 'Generate daily settlements'}
               </button>
             </>
           }
         >
           <div className="dim small">
-            {merchant.name} — settles all captured activity in the window. Regenerating an existing window returns
-            the same settlement.
+            {merchant.name} — creates <b>one settlement per processing day</b> in the window, so each day is
+            confirmed and paid on its own. Confirm each day’s payout from <b>Settlements</b>. Re-running is safe —
+            days already settled are returned, not duplicated.
           </div>
           {genMsg && <div className="form-error">{genMsg}</div>}
           <div className="field">
@@ -483,8 +476,7 @@ export default function MerchantDetailPage() {
             </select>
             {genCcy === 'ALL' && (
               <div className="dim small" style={{ marginTop: 6 }}>
-                Generates one settlement per currency ({genCurrencies.join(', ')}) for the same window. Currencies
-                with nothing matured to settle are skipped.
+                One settlement per day, for every currency ({genCurrencies.join(', ')}) in the window.
               </div>
             )}
           </div>

@@ -284,6 +284,13 @@ export interface GenerateSkipped {
   reason: string
 }
 
+export interface PerDayGenResult {
+  currency: string
+  days_generated: number
+  days_skipped: number
+  results: { date: string; status: 'generated' | 'skipped'; reason?: string; settlement_id?: number }[]
+}
+
 // ---- Ledger ----
 export interface LedgerAccount {
   account_id: number | string

@@ -132,6 +132,32 @@ def test_cancel_frees_events_then_resettle_per_day(conn):
     assert "settlement_id" in res_b and res_b["settlement_id"] != sid_a
 
 
+def test_generate_per_day_makes_one_settlement_each(conn):
+    # two captures on two different days → two separate daily settlements
+    d1 = datetime(2026, 6, 20, 9, 0, tzinfo=timezone.utc)
+    d2 = datetime(2026, 6, 21, 9, 0, tzinfo=timezone.utc)
+    _capture(conn, "pd1", d1)
+    _capture(conn, "pd2", d2)
+    ws = datetime(2026, 6, 20, 0, 0, tzinfo=timezone.utc)
+    we = datetime(2026, 6, 21, 23, 59, 59, tzinfo=timezone.utc)
+    summary = settle_mod.generate_per_day(conn, merchant_id=1, currency="EUR",
+                                          window_start=ws, window_end=we, cutoff=NOW)
+    conn.commit()
+    assert summary["days_generated"] == 2
+    # each is its own single-day settlement with exactly its own event
+    sids = [r["settlement_id"] for r in summary["results"] if r["status"] == "generated"]
+    assert len(sids) == 2 and _items(conn, sids[0]) == 1 and _items(conn, sids[1]) == 1
+
+    # confirming one pays ONLY that day — the other stays generated
+    settle_mod.complete(conn, sids[0])
+    conn.commit()
+    cur = conn.cursor()
+    cur.execute("SELECT state FROM settlements WHERE id=ANY(%s) ORDER BY id", (sids,))
+    states = [r["state"] for r in cur.fetchall()]
+    assert states == ["completed", "generated"]
+    assert _unbalanced(conn) == 0
+
+
 def test_cannot_cancel_completed(conn):
     day_c = datetime(2026, 6, 15, 10, 0, tzinfo=timezone.utc)  # own day → own run-key
     _capture(conn, "c", day_c)
