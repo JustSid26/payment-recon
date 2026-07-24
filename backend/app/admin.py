@@ -15,6 +15,7 @@ from psycopg.rows import dict_row
 from .auth import require_admin
 from .db import get_pool
 from .importer import Importer, build_name_map
+from . import onboarding as onboarding_mod
 
 router = APIRouter(prefix="/api/admin")
 
@@ -53,6 +54,35 @@ def reset(user: dict = Depends(require_admin)):
         cur.execute("TRUNCATE " + ", ".join(_TABLES) + " RESTART IDENTITY CASCADE")
         conn.commit()
         return {"ok": True, "status": _status(cur)}
+
+
+@router.post("/recalculate-reserve")
+def recalculate_reserve(user: dict = Depends(require_admin)):
+    """Re-post every configured merchant's transactions at its current fee schedule.
+
+    The rolling-reserve base changed (net-of-fees → gross captured), and posted
+    ledger events are immutable, so historical holds only pick the new formula up
+    by being reversed and replayed. Each merchant runs on its own connection so one
+    refusal doesn't abort the rest; merchants whose transactions are already settled
+    are reported as skipped (their events cannot be re-priced without a re-import).
+    """
+    with get_pool().connection() as conn:
+        targets = onboarding_mod.configured_merchants(conn)
+
+    repriced, skipped = [], []
+    for m in targets:
+        entry = {"merchant_uuid": str(m["merchant_uuid"]), "name": m["name"]}
+        with get_pool().connection() as conn:
+            try:
+                summary = onboarding_mod.recalculate(conn, m["id"])
+                conn.commit()
+                repriced.append({**entry,
+                                 "transactions_repriced": summary["transactions_repriced"],
+                                 "transactions_posted": summary["transactions_posted"]})
+            except ValueError as ex:
+                skipped.append({**entry, "reason": str(ex)})
+    return {"merchants": len(targets), "repriced": len(repriced),
+            "skipped": len(skipped), "results": repriced, "errors": skipped}
 
 
 @router.post("/upload")

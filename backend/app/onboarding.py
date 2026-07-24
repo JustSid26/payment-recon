@@ -158,6 +158,38 @@ def _reprocess_body(conn: psycopg.Connection, cur, merchant_id: int) -> int:
     return len(txns)
 
 
+def schedule_rates(conn: psycopg.Connection, merchant_id: int) -> dict | None:
+    """A merchant's current fee schedule as a rates dict, or None if unconfigured."""
+    cur = conn.cursor()
+    cur.execute("SELECT * FROM fee_schedules WHERE merchant_id=%s", (merchant_id,))
+    row = cur.fetchone()
+    return None if row is None else {c: row[c] for c in FEE_COLUMNS}
+
+
+def configured_merchants(conn: psycopg.Connection) -> list[dict]:
+    """Merchants that have a fee schedule — the candidates for a re-price."""
+    cur = conn.cursor()
+    cur.execute("""SELECT m.id, m.merchant_uuid, m.name FROM merchants m
+                     JOIN fee_schedules f ON f.merchant_id = m.id
+                    ORDER BY m.name""")
+    return cur.fetchall()
+
+
+def recalculate(conn: psycopg.Connection, merchant_id: int) -> dict:
+    """Re-post a merchant's transactions at its CURRENT (unchanged) fee schedule.
+
+    Used after a posting *formula* changes — e.g. the rolling-reserve base moving
+    from net-of-fees to gross captured — so already-imported transactions pick the
+    new formula up. Runs the same append-only reverse-and-replay path a rate change
+    uses, and inherits its guard: it refuses if any of the merchant's events are
+    already linked to a settlement.
+    """
+    rates = schedule_rates(conn, merchant_id)
+    if rates is None:
+        raise ValueError("merchant has no fee schedule")
+    return assign_fee_schedule(conn, merchant_id, rates)
+
+
 def unconfigured_merchants(conn: psycopg.Connection) -> list[dict]:
     """Merchants awaiting onboarding, with how many transactions are quarantined."""
     cur = conn.cursor()

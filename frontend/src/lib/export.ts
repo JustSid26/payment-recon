@@ -43,20 +43,41 @@ const xmlEsc = (v: Cell) =>
     .replace(/>/g, '&gt;')
     .replace(/"/g, '&quot;')
 
+export interface ExcelSheet {
+  name: string
+  rows: Cell[][]
+}
+
+/** Excel caps sheet names at 31 chars and forbids : \ / ? * [ ]. */
+function sheetName(name: string): string {
+  return (name.replace(/[:\\/?*[\]]/g, '-').trim() || 'Sheet').slice(0, 31)
+}
+
 /**
- * One-sheet Excel workbook. Row 0 is treated as a bold header. Numeric cells get a
- * thousands + 2-decimal format; pass money as major-unit numbers (see toMajor).
+ * Multi-sheet Excel workbook. Row 0 of each sheet is treated as a bold header.
+ * Numeric cells get a thousands + 2-decimal format; pass money as major-unit
+ * numbers (see toMajor). Duplicate sheet names are suffixed — Excel refuses to
+ * open a workbook that declares the same name twice.
  */
-export function downloadExcel(filename: string, sheetName: string, rows: Cell[][]) {
+export function downloadExcelWorkbook(filename: string, sheets: ExcelSheet[]) {
   const cell = (v: Cell, header: boolean) => {
     const isNum = typeof v === 'number' && Number.isFinite(v)
     const type = isNum ? 'Number' : 'String'
     const style = header ? ' ss:StyleID="hdr"' : isNum ? ' ss:StyleID="num"' : ''
     return `<Cell${style}><Data ss:Type="${type}">${xmlEsc(v)}</Data></Cell>`
   }
-  const body = rows
-    .map((r, i) => `<Row>${r.map((c) => cell(c, i === 0)).join('')}</Row>`)
-    .join('')
+  const used = new Set<string>()
+  const body = sheets
+    .map(({ name, rows }) => {
+      let unique = sheetName(name)
+      for (let i = 2; used.has(unique); i += 1) unique = `${sheetName(name).slice(0, 27)} (${i})`
+      used.add(unique)
+      const table = rows
+        .map((r, i) => `<Row>${r.map((c) => cell(c, i === 0)).join('')}</Row>`)
+        .join('')
+      return `<Worksheet ss:Name="${xmlEsc(unique)}"><Table>${table}</Table></Worksheet>`
+    })
+    .join('\n')
   const xml =
     `<?xml version="1.0"?>\n<?mso-application progid="Excel.Sheet"?>\n` +
     `<Workbook xmlns="urn:schemas-microsoft-com:office:spreadsheet" ` +
@@ -65,10 +86,14 @@ export function downloadExcel(filename: string, sheetName: string, rows: Cell[][
     `<Style ss:ID="hdr"><Font ss:Bold="1"/>` +
     `<Interior ss:Color="#F2F4F7" ss:Pattern="Solid"/></Style>` +
     `<Style ss:ID="num"><NumberFormat ss:Format="#,##0.00"/></Style>` +
-    `</Styles>\n` +
-    `<Worksheet ss:Name="${xmlEsc(sheetName).slice(0, 31)}"><Table>${body}</Table></Worksheet>\n` +
+    `</Styles>\n${body}\n` +
     `</Workbook>`
   triggerDownload(new Blob([xml], { type: 'application/vnd.ms-excel' }), filename)
+}
+
+/** One-sheet Excel workbook. See {@link downloadExcelWorkbook}. */
+export function downloadExcel(filename: string, name: string, rows: Cell[][]) {
+  downloadExcelWorkbook(filename, [{ name, rows }])
 }
 
 /**

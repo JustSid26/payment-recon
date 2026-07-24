@@ -1,11 +1,11 @@
 import { useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { api } from '../lib/api'
+import { api, ApiError } from '../lib/api'
 import { useApi } from '../lib/useApi'
 import type { DailySettlementResp, DailySettlementRow, SettlementLineItem } from '../lib/types'
 import { fmtDate, fmtDateTime, fmtInt, fmtMoney } from '../lib/money'
-import { DataTable, EmptyState, LoadingBlock, Modal, StatusChip, type Column } from './ui'
-import { downloadCSV, downloadExcel, printToPDF, printModal, toMajor } from '../lib/export'
+import { DataTable, EmptyState, LoadingBlock, Modal, StatusChip, toastError, toastSuccess, type Column } from './ui'
+import { downloadCSV, downloadExcel, downloadExcelWorkbook, printToPDF, printModal, toMajor } from '../lib/export'
 
 const TYPE_LABEL: Record<string, string> = {
   payment_captured: 'Payment',
@@ -15,6 +15,49 @@ const TYPE_LABEL: Record<string, string> = {
 const typeLabel = (t: string) => TYPE_LABEL[t] ?? t.replace(/_/g, ' ')
 
 const slug = (s: string) => s.replace(/[^a-z0-9]+/gi, '-').replace(/^-|-$/g, '').toLowerCase()
+
+/** How many days' transactions to fetch at once when building the workbook. */
+const FETCH_CONCURRENCY = 6
+
+const TXN_HEADER = [
+  '#', 'Time (UTC)', 'Type', 'Reference', 'Brand', 'Last 4', 'Status',
+  'Gross', 'MDR', 'Approved fee', 'Declined fee', 'Refund fee', 'Chargeback fee', 'Reserve', 'Net',
+]
+
+/** One day's transactions as spreadsheet rows — shared by every export path. */
+function transactionRows(items: SettlementLineItem[], currency: string): (string | number)[][] {
+  return [
+    TXN_HEADER,
+    ...items.map((it, i) => [
+      i + 1, fmtDateTime(it.occurred_at), typeLabel(it.type), it.reference, it.brand,
+      it.last_four, it.status,
+      toMajor(it.gross_minor, currency), toMajor(it.mdr_minor, currency),
+      toMajor(it.approved_fee_minor, currency), toMajor(it.declined_fee_minor, currency),
+      toMajor(it.refund_fee_minor, currency), toMajor(it.chargeback_fee_minor, currency),
+      toMajor(it.reserve_minor, currency), toMajor(it.net_minor, currency),
+    ]),
+  ]
+}
+
+const fetchDayTransactions = (merchantUuid: string, day: string, currency: string) =>
+  api<{ items: SettlementLineItem[] }>(
+    `/api/merchants/${merchantUuid}/daily-settlement/${day}/transactions`,
+    { params: { currency } },
+  ).then((r) => r.items)
+
+/** Run `task` over `items` at a bounded concurrency, preserving input order. */
+async function mapLimit<T, R>(items: T[], limit: number, task: (item: T) => Promise<R>): Promise<R[]> {
+  const out: R[] = new Array(items.length)
+  let next = 0
+  const worker = async () => {
+    while (next < items.length) {
+      const i = next++
+      out[i] = await task(items[i])
+    }
+  }
+  await Promise.all(Array.from({ length: Math.min(limit, items.length) }, worker))
+  return out
+}
 
 /** Signed money, red when negative, dimmed when zero. */
 function Signed({ minor, ccy }: { minor: number; ccy: string }) {
@@ -54,6 +97,8 @@ export default function DailySettlementRecords({
   const [dateFrom, setDateFrom] = useState('')
   const [dateTo, setDateTo] = useState('')
   const [openDay, setOpenDay] = useState<string | null>(null)
+  const [busyDay, setBusyDay] = useState<string | null>(null)
+  const [buildingBook, setBuildingBook] = useState(false)
 
   const { data, loading } = useApi(
     () =>
@@ -67,6 +112,53 @@ export default function DailySettlementRecords({
   const currencies = data?.currencies ?? []
   const days = data?.days ?? []
   const totals = data?.totals
+
+  // ---- day-wise transaction reports ----
+  const txnBase = `daily-txns-${slug(merchantName)}-${currency}`
+
+  /** One day's transactions as its own .xls. */
+  const downloadDay = async (day: string) => {
+    setBusyDay(day)
+    try {
+      const items = await fetchDayTransactions(merchantUuid, day, currency)
+      if (items.length === 0) {
+        toastError(`No transactions on ${fmtDate(day)}`)
+        return
+      }
+      downloadExcel(`${txnBase}-${day}.xls`, day, transactionRows(items, currency))
+    } catch (e) {
+      toastError(e instanceof ApiError ? e.message : 'Could not build that day’s report')
+    } finally {
+      setBusyDay(null)
+    }
+  }
+
+  /** Every listed day in one workbook, a sheet per processing date. */
+  const downloadAllDays = async () => {
+    setBuildingBook(true)
+    try {
+      const perDay = await mapLimit(days, FETCH_CONCURRENCY, (d) =>
+        fetchDayTransactions(merchantUuid, d.date, currency))
+      const sheets = days
+        .map((d, i) => ({ date: d.date, items: perDay[i] }))
+        .filter((d) => d.items.length > 0)
+        .map((d) => ({ name: d.date, rows: transactionRows(d.items, currency) }))
+      if (sheets.length === 0) {
+        toastError('No transactions in this date range')
+        return
+      }
+      downloadExcelWorkbook(`${txnBase}.xls`, sheets)
+      const empty = days.length - sheets.length
+      toastSuccess(
+        `${fmtInt(sheets.length)} day${sheets.length === 1 ? '' : 's'} exported` +
+        (empty ? ` · ${fmtInt(empty)} with no transactions skipped` : ''),
+      )
+    } catch (e) {
+      toastError(e instanceof ApiError ? e.message : 'Could not build the transaction report')
+    } finally {
+      setBuildingBook(false)
+    }
+  }
 
   const cols: Column<DailySettlementRow>[] = [
     {
@@ -114,6 +206,24 @@ export default function DailySettlementRecords({
         ) : (
           <StatusChip status={r.status} />
         ),
+    },
+    {
+      key: 'report',
+      header: 'Transactions',
+      align: 'right',
+      render: (r) => (
+        <button
+          className="export-btn"
+          disabled={r.volume === 0 || busyDay === r.date}
+          title={`Download this day’s transactions as Excel`}
+          onClick={(e) => {
+            e.stopPropagation()
+            void downloadDay(r.date)
+          }}
+        >
+          {busyDay === r.date ? 'Building…' : '⬇ Excel'}
+        </button>
+      ),
     },
   ]
 
@@ -184,10 +294,19 @@ export default function DailySettlementRecords({
             {(dateFrom || dateTo) && (
               <button className="btn sm" onClick={() => { setDateFrom(''); setDateTo('') }}>Clear</button>
             )}
-            <span className="export-label" style={{ marginLeft: 6 }}>Export</span>
+            <span className="export-label" style={{ marginLeft: 6 }}>Summary</span>
             <button className="export-btn" onClick={exportCSV} disabled={!days.length}>CSV</button>
             <button className="export-btn" onClick={exportExcel} disabled={!days.length}>Excel</button>
             <button className="export-btn" onClick={printToPDF} disabled={!days.length}>PDF</button>
+            <span className="export-label" style={{ marginLeft: 6 }}>Transactions</span>
+            <button
+              className="export-btn"
+              onClick={() => void downloadAllDays()}
+              disabled={!days.length || buildingBook}
+              title="One workbook with a sheet per processing day"
+            >
+              {buildingBook ? 'Building…' : '⬇ All days (Excel)'}
+            </button>
           </div>
         </div>
         <DataTable
@@ -263,17 +382,7 @@ function DayModal({
     })
   }, [items, q, typeF])
 
-  const rows = (): (string | number)[][] => [
-    ['#', 'Time (UTC)', 'Type', 'Reference', 'Brand', 'Last 4', 'Status',
-     'Gross', 'MDR', 'Approved fee', 'Declined fee', 'Refund fee', 'Chargeback fee', 'Reserve', 'Net'],
-    ...filtered.map((it, i) => [
-      i + 1, fmtDateTime(it.occurred_at), typeLabel(it.type), it.reference, it.brand, it.last_four, it.status,
-      toMajor(it.gross_minor, currency), toMajor(it.mdr_minor, currency),
-      toMajor(it.approved_fee_minor, currency), toMajor(it.declined_fee_minor, currency),
-      toMajor(it.refund_fee_minor, currency), toMajor(it.chargeback_fee_minor, currency),
-      toMajor(it.reserve_minor, currency), toMajor(it.net_minor, currency),
-    ]),
-  ]
+  const rows = () => transactionRows(filtered, currency)
   const base = `daily-txns-${slug(merchantName)}-${currency}-${day}`
   const sum = (k: keyof SettlementLineItem) =>
     filtered.reduce((a, it) => a + (typeof it[k] === 'number' ? (it[k] as number) : 0), 0)

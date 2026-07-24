@@ -123,7 +123,10 @@ def test_small_capture_clamps_instead_of_crashing(conn):
               "ELSE -amount_minor END),0) b FROM ledger_entries le JOIN accounts a "
               "ON a.id=le.account_id WHERE a.account_type='merchant_payable' AND a.merchant_id=%s",
               (mid,))["b"]
-    assert pay == 0  # merchant nets zero, no negative leg booked
+    # The capture books a zero payable (fees ate it all) rather than a negative leg;
+    # the reserve is then held on the gross 0.20 → 0.02, so payable ends at −0.02.
+    # That deficit is real and carries to the next settlement — it is not clamped away.
+    assert pay == -2
 
 
 def test_run_cycle_clamps_future_cutoff(conn):

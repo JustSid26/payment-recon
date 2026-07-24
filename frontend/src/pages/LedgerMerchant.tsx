@@ -25,7 +25,7 @@ const CURRENCY_SYMBOL: Record<string, string> = {
 }
 
 type LedgerView = 'daily' | 'whole'
-type LedgerDisplayRow = MerchantLedgerStatementRow & { period_label?: string; confirmation_label?: string }
+type LedgerDisplayRow = MerchantLedgerStatementRow & { period_label?: string }
 
 function CurrencyCell({ currency }: { currency: string }) {
   return (
@@ -93,7 +93,6 @@ function aggregateRows(items: MerchantLedgerStatementRow[], dateFrom: string, da
         event_count: currencyRows.reduce((sum, row) => sum + row.event_count, 0),
         pay_status: wholeStatus,
         confirmation: latest?.confirmation ?? '',
-        confirmation_label: `${fmtInt(currencyRows.length)} day${currencyRows.length === 1 ? '' : 's'} · ${fmtInt(currencyRows.reduce((sum, row) => sum + row.event_count, 0))} events`,
         confirmed: currencyRows.some((row) => row.confirmed),
       }
     })
@@ -103,25 +102,6 @@ function moneyTone(minor: number): 'positive' | 'negative' | 'neutral' {
   if (minor > 0) return 'positive'
   if (minor < 0) return 'negative'
   return 'neutral'
-}
-
-function movementLabel(row: LedgerDisplayRow): string {
-  if (row.row_id.startsWith('whole:')) return 'Whole ledger'
-  if (row.processed_minor > 0) return 'Processed day'
-  if (row.paid_minor > 0) return 'Paid out'
-  if (row.payable_minor < 0 && row.processed_minor === 0) return 'Settlement allocated'
-  if (row.reserve_minor !== 0) return 'Reserve movement'
-  if (row.payable_minor !== 0) return 'Payable movement'
-  return 'Ledger movement'
-}
-
-function movementHint(row: LedgerDisplayRow): string {
-  if (row.row_id.startsWith('whole:')) return row.confirmation_label ?? `${fmtInt(row.event_count)} events`
-  if (row.processed_minor > 0) return `${fmtInt(row.event_count)} transaction event${row.event_count === 1 ? '' : 's'}`
-  if (row.paid_minor > 0) return 'Settlement payout posted'
-  if (row.payable_minor < 0 && row.processed_minor === 0) return 'Payable moved into settlement'
-  if (row.reserve_minor !== 0) return 'Reserve held or released'
-  return `${fmtInt(row.event_count)} ledger event${row.event_count === 1 ? '' : 's'}`
 }
 
 export default function LedgerMerchant() {
@@ -214,7 +194,6 @@ export default function LedgerMerchant() {
       'Rolling reserve',
       'Paid',
       'Status',
-      'Movement',
       'Events',
     ],
     ...items.map((r: LedgerDisplayRow) => [
@@ -225,7 +204,6 @@ export default function LedgerMerchant() {
         toMajor(r.reserve_minor, r.currency),
         toMajor(r.paid_minor, r.currency),
         r.pay_status === 'na' ? '' : PAY_STATUS_LABEL[r.pay_status],
-        movementLabel(r),
         r.event_count,
       ]),
   ]
@@ -247,16 +225,6 @@ export default function LedgerMerchant() {
     { key: 'paid', header: 'Paid', align: 'right', render: (r) => <MoneyCell minor={r.paid_minor} currency={r.currency} dimZero /> },
     { key: 'currency', header: 'Currency', render: (r) => <CurrencyCell currency={r.currency} /> },
     { key: 'status', header: 'Status', render: (r) => <PayStatusPill status={r.pay_status} /> },
-    {
-      key: 'movement',
-      header: 'Movement',
-      render: (r) => (
-        <div className="movement-cell">
-          <b>{movementLabel(r)}</b>
-          <small>{movementHint(r)}</small>
-        </div>
-      ),
-    },
   ]
 
   return (

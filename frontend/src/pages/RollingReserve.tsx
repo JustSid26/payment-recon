@@ -1,10 +1,10 @@
 import { Fragment, useMemo, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
-import { api } from '../lib/api'
+import { api, ApiError } from '../lib/api'
 import { useApi } from '../lib/useApi'
-import type { CcyAmount, Merchant, MerchantDetail, ReserveStatement } from '../lib/types'
+import type { CcyAmount, Merchant, MerchantDetail, RecalculateResult, ReserveStatement } from '../lib/types'
 import { fmtInt, fmtMoney } from '../lib/money'
-import { DataTable, EmptyState, LoadingBlock, MoneyCell, StatusChip, type Column } from '../components/ui'
+import { DataTable, EmptyState, LoadingBlock, Modal, MoneyCell, StatusChip, toastError, toastSuccess, type Column } from '../components/ui'
 
 function CcyStack({ rows }: { rows: CcyAmount[] }) {
   const visible = [...rows].filter((r) => r.minor !== 0).sort((a, b) => a.currency.localeCompare(b.currency))
@@ -32,9 +32,31 @@ export default function RollingReserve() {
 
 function RollingReserveList() {
   const navigate = useNavigate()
-  const { data, loading } = useApi(() => api<{ items: Merchant[] }>('/api/merchants'), [])
+  const { data, loading, reload } = useApi(() => api<{ items: Merchant[] }>('/api/merchants'), [])
   const [q, setQ] = useState('')
   const [onlyWithReserve, setOnlyWithReserve] = useState(false)
+
+  // Recalculate: re-post every configured merchant at its current schedule so
+  // holds booked under the old reserve base pick up the new one.
+  const [showRecalc, setShowRecalc] = useState(false)
+  const [recalcBusy, setRecalcBusy] = useState(false)
+  const [recalcResult, setRecalcResult] = useState<RecalculateResult | null>(null)
+
+  const doRecalculate = async () => {
+    setRecalcBusy(true)
+    setRecalcResult(null)
+    try {
+      const res = await api<RecalculateResult>('/api/admin/recalculate-reserve', { method: 'POST' })
+      setRecalcResult(res)
+      if (res.repriced > 0) toastSuccess(`Recalculated ${fmtInt(res.repriced)} merchant${res.repriced === 1 ? '' : 's'}`)
+      else toastError('Nothing could be recalculated — see the details')
+      reload()
+    } catch (e) {
+      toastError(e instanceof ApiError ? e.message : 'Recalculation failed')
+    } finally {
+      setRecalcBusy(false)
+    }
+  }
 
   const items = useMemo(() => data?.items ?? [], [data])
   const rows = useMemo(() => {
@@ -92,9 +114,14 @@ function RollingReserveList() {
           <h1>Rolling reserve</h1>
           <div className="sub">
             {data
-              ? `${fmtInt(rows.length)} merchant${rows.length === 1 ? '' : 's'} · ${fmtInt(merchantsWithReserve)} with reserve held`
+              ? `${fmtInt(rows.length)} merchant${rows.length === 1 ? '' : 's'} · ${fmtInt(merchantsWithReserve)} with reserve held · held on gross captured volume`
               : ' '}
           </div>
+        </div>
+        <div className="head-actions">
+          <button className="btn" onClick={() => setShowRecalc(true)} disabled={recalcBusy}>
+            ↻ Recalculate reserve
+          </button>
         </div>
       </div>
 
@@ -128,6 +155,63 @@ function RollingReserveList() {
           empty={<EmptyState title={q || onlyWithReserve ? 'No matches' : 'No merchants'} hint="Reserve appears after posted reserve-hold ledger events" />}
         />
       </div>
+
+      {showRecalc && (
+        <Modal
+          title="Recalculate rolling reserve"
+          onClose={() => (recalcBusy ? null : setShowRecalc(false))}
+          footer={
+            <>
+              <button className="btn" onClick={() => setShowRecalc(false)} disabled={recalcBusy}>
+                {recalcResult ? 'Close' : 'Cancel'}
+              </button>
+              <button className="btn primary" onClick={() => void doRecalculate()} disabled={recalcBusy}>
+                {recalcBusy ? 'Recalculating…' : recalcResult ? 'Run again' : 'Recalculate'}
+              </button>
+            </>
+          }
+        >
+          <div>
+            Re-posts every configured merchant's transactions at its <b>current</b> fee schedule, so
+            reserve holds booked under the old basis (net of fees) are reissued on <b>gross captured</b>.
+          </div>
+          <div className="dim small" style={{ marginTop: 8 }}>
+            The ledger stays append-only — old events are reversed and replayed, never edited. Merchants
+            whose transactions are already settled cannot be re-priced and are reported as skipped.
+          </div>
+          {recalcResult && (
+            <div style={{ marginTop: 16 }}>
+              <div className="outcome-summary">
+                <div className="outcome ok">
+                  <div className="ov num">{fmtInt(recalcResult.repriced)}</div>
+                  <div className="ol">Recalculated</div>
+                </div>
+                <div className="outcome bad">
+                  <div className="ov num">{fmtInt(recalcResult.skipped)}</div>
+                  <div className="ol">Skipped</div>
+                </div>
+                <div className="outcome">
+                  <div className="ov num">{fmtInt(recalcResult.merchants)}</div>
+                  <div className="ol">Merchants checked</div>
+                </div>
+              </div>
+              {recalcResult.errors.length > 0 && (
+                <div className="stack" style={{ gap: 6, marginTop: 12, maxHeight: 220, overflowY: 'auto' }}>
+                  {recalcResult.errors.map((e) => (
+                    <div className="file-result bad" key={e.merchant_uuid}>
+                      <span className="mark">✗</span>
+                      <div style={{ minWidth: 0, flex: 1 }}>
+                        <div className="fr-name">{e.name}</div>
+                        <div className="dim small">{e.reason}</div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+        </Modal>
+      )}
     </div>
   )
 }

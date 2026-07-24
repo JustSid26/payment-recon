@@ -281,11 +281,14 @@ class Importer:
                 fee_rows.append((pay_id, mid, "approved_txn", ccy, app_fee, txn_id))
             # (captures/declines are counted by status in _commit_chunk, not here)
 
-            # Rolling reserve is a % of the net-of-fees payable (capture minus MDR
-            # and the approved-txn fee) — this reproduces the client workbook's RR
-            # figure exactly. Since it's a fraction of payable it can never drive
-            # merchant_payable negative on its own.
-            hold = bps_of(payable, sched["reserve_hold_bps"])
+            # Rolling reserve is a % of the GROSS captured amount (the annex rate
+            # card — "Rolling Reserve 10%" — is read against processing volume, not
+            # against what is left after our own fees). It is therefore deterministic
+            # per transaction and independent of the fee schedule's other rates.
+            # Note this CAN push merchant_payable negative on a degenerate capture
+            # whose fees already consume the whole amount; that is a real deficit and
+            # the settlement engine carries it (docs/04 §4) rather than hiding it.
+            hold = bps_of(captured, sched["reserve_hold_bps"])
             if hold > 0:
                 poster.add(
                     event_type="reserve_hold", source_type="reserve_hold",

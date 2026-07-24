@@ -98,19 +98,38 @@ def _reserve(conn, mid):
                "WHERE a.merchant_id=%s AND a.account_type='merchant_reserve'", (mid,))["v"]
 
 
+def test_reserve_is_percent_of_gross_captured(conn):
+    """The rolling reserve is held on the GROSS capture — the annex rate card reads
+    against processing volume, so MDR and the approved-txn fee must not shrink it."""
+    Importer(conn)._commit_chunk([row("rr1", "88001", "Reserve Base Co")], "t.csv", {})
+    mid = one(conn, "SELECT id FROM merchants WHERE member_id='88001'")["id"]
+    ob.assign_fee_schedule(conn, mid, ob.resolve_rates(
+        overrides={"mdr_bps": 650, "approved_txn_fee_minor": 35, "reserve_hold_bps": 1000}))
+    # 10% of the 100000 gross capture — NOT 10% of the 93465 net-of-fees payable
+    assert _reserve(conn, mid) == 10_000
+
+
 def test_changing_rate_reprices_the_ledger(conn):
     # 1000.00 capture, onboard at 5% rolling reserve
     Importer(conn)._commit_chunk([row("rp1", "77001", "Reprice Co")], "t.csv", {})
     mid = one(conn, "SELECT id FROM merchants WHERE member_id='77001'")["id"]
     ob.assign_fee_schedule(conn, mid,
                            ob.resolve_rates(overrides={"mdr_bps": 300, "reserve_hold_bps": 500}))
-    assert _reserve(conn, mid) == 4_850       # 5% of net-of-fees payable (100000 - 3000 MDR)
+    assert _reserve(conn, mid) == 5_000       # 5% of the 100000 gross capture
 
     # change rolling reserve 5% -> 20%: must RE-PRICE, not stack on the old hold
     summary = ob.assign_fee_schedule(conn, mid,
                                      ob.resolve_rates(overrides={"mdr_bps": 300, "reserve_hold_bps": 2000}))
     assert summary["transactions_repriced"] >= 1
-    assert _reserve(conn, mid) == 19_400      # now 20% of net-of-fees payable, old hold reversed (not stacked)
+    assert _reserve(conn, mid) == 20_000      # now 20% of gross, old hold reversed (not stacked)
+
+
+def test_recalculate_reposts_at_current_schedule(conn):
+    """A formula change is picked up by re-posting at the SAME schedule."""
+    mid = one(conn, "SELECT id FROM merchants WHERE member_id='77001'")["id"]
+    summary = ob.recalculate(conn, mid)
+    assert summary["transactions_repriced"] >= 1
+    assert _reserve(conn, mid) == 20_000      # unchanged rates → unchanged result
     # ledger still balances after the reverse+replay
     bad = one(conn, """SELECT COUNT(*) AS n FROM (
         SELECT event_id FROM ledger_entries GROUP BY event_id

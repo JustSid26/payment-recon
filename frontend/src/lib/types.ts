@@ -418,6 +418,16 @@ export interface MailSendResult {
   reason?: string
 }
 
+// ---- Admin: reserve recalculation ----
+export interface RecalculateResult {
+  /** How many configured merchants were considered. */
+  merchants: number
+  repriced: number
+  skipped: number
+  results: { merchant_uuid: string; name: string; transactions_repriced: number; transactions_posted: number }[]
+  errors: { merchant_uuid: string; name: string; reason: string }[]
+}
+
 // ---- Admin: status / reset / upload ----
 export interface AdminStatus {
   counts: {
