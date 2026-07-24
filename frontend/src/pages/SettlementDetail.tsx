@@ -264,13 +264,24 @@ export default function SettlementDetailPage() {
     }
   }
 
-  const markCompleted = async () => {
+  // Confirm the WHOLE settlement. If it's being paid per day, pay every still-
+  // unpaid day (never the whole net again — that would double-pay days already
+  // settled). Otherwise (a day nets ≤ 0) post one whole-settlement payout.
+  const confirmWhole = async () => {
     setCompleting(true)
     try {
-      await api(`/api/settlements/${uuid}/complete`, { method: 'POST' })
-      toastSuccess('Payout confirmed — posted to the ledger, merchant balances updated, confirmation emailed')
+      const dp = dayPay.data
+      if (dp && dp.per_day_available) {
+        for (const day of dp.days.filter((d) => !d.paid).map((d) => d.day)) {
+          await api(`/api/settlements/${uuid}/days/${day}/complete`, { method: 'POST' })
+        }
+      } else {
+        await api(`/api/settlements/${uuid}/complete`, { method: 'POST' })
+      }
+      toastSuccess('Payout confirmed — settlement marked paid, balances updated')
       setShowConfirm(false)
       reload()
+      dayPay.reload()
     } catch (e) {
       toastError(e instanceof ApiError ? e.message : 'Failed to confirm payout')
     } finally {
@@ -467,9 +478,14 @@ export default function SettlementDetailPage() {
           {isAdmin && (s.state === 'generated' || s.state === 'completed') && (
             <div className="head-actions">
               {s.state === 'generated' ? (
-                <button className="btn" onClick={() => setShowCancel(true)} disabled={completing || cancelling}>
-                  Cancel settlement
-                </button>
+                <>
+                  <button className="btn" onClick={() => setShowCancel(true)} disabled={completing || cancelling}>
+                    Cancel settlement
+                  </button>
+                  <button className="btn primary" onClick={() => setShowConfirm(true)} disabled={completing || cancelling}>
+                    {completing ? 'Posting payout…' : '✓ Confirm payout'}
+                  </button>
+                </>
               ) : (
                 <>
                   <button className="btn success" disabled>
@@ -511,7 +527,7 @@ export default function SettlementDetailPage() {
       </div>
 
       {view === 'statement' ? (
-        <StatementView s={s} counts={counts} />
+        <StatementView s={s} counts={counts} dayPay={dayPay.data} />
       ) : view === 'daily' ? (
         <DailyView
           days={days}
@@ -529,31 +545,44 @@ export default function SettlementDetailPage() {
         <LinesView items={items} loading={lines.loading} ccy={ccy} />
       )}
 
-      {showConfirm && (
-        <Modal
-          title="Confirm payout"
-          onClose={() => (completing ? null : setShowConfirm(false))}
-          footer={
-            <>
-              <button className="btn" onClick={() => setShowConfirm(false)} disabled={completing}>Cancel</button>
-              <button className="btn primary" onClick={() => void markCompleted()} disabled={completing}>
-                {completing ? 'Posting payout…' : `Confirm & pay ${fmtMoney(b.net_payout_minor, ccy)}`}
-              </button>
-            </>
-          }
-        >
-          <div>
-            Confirm the payout of <b>{fmtMoney(b.net_payout_minor, ccy)}</b> to <b>{s.merchant_name}</b> for
-            the window {fmtDate(s.window_start)} → {fmtDate(s.window_end)}.
-          </div>
-          <ul className="dim small" style={{ margin: '10px 0 0', paddingLeft: 18, lineHeight: 1.7 }}>
-            <li>Posts the payout to the ledger (settlement → paid; money leaves the gateway clearing account).</li>
-            <li>Marks this settlement <b>completed</b> — it moves from “In settlement” to “Paid” on the merchant’s balances and daily records.</li>
-            <li>Emails the payout confirmation to the merchant (if an email is on file).</li>
-          </ul>
-          <div className="dim small" style={{ marginTop: 10 }}>This posts an append-only ledger event and cannot be undone from the UI.</div>
-        </Modal>
-      )}
+      {showConfirm && (() => {
+        const dp = dayPay.data
+        const remainingDays = dp ? dp.days.filter((d) => !d.paid) : []
+        const partial = dp ? dp.days_paid > 0 : false
+        const amount = dp && dp.per_day_available
+          ? remainingDays.reduce((a, d) => a + d.payout_minor, 0)
+          : b.net_payout_minor
+        return (
+          <Modal
+            title="Confirm payout"
+            onClose={() => (completing ? null : setShowConfirm(false))}
+            footer={
+              <>
+                <button className="btn" onClick={() => setShowConfirm(false)} disabled={completing}>Cancel</button>
+                <button className="btn primary" onClick={() => void confirmWhole()} disabled={completing}>
+                  {completing ? 'Posting payout…' : `Confirm & pay ${fmtMoney(amount, ccy)}`}
+                </button>
+              </>
+            }
+          >
+            <div>
+              {partial ? (
+                <>Pay the <b>{fmtInt(remainingDays.length)} remaining day{remainingDays.length === 1 ? '' : 's'}</b>{' '}
+                (<b>{fmtMoney(amount, ccy)}</b>) to <b>{s.merchant_name}</b> — the other{' '}
+                {fmtInt(dp?.days_paid ?? 0)} day{(dp?.days_paid ?? 0) === 1 ? ' is' : 's are'} already paid.</>
+              ) : (
+                <>Confirm the whole payout of <b>{fmtMoney(amount, ccy)}</b> to <b>{s.merchant_name}</b> for the
+                window {fmtDate(s.window_start)} → {fmtDate(s.window_end)}.</>
+              )}
+            </div>
+            <ul className="dim small" style={{ margin: '10px 0 0', paddingLeft: 18, lineHeight: 1.7 }}>
+              <li>Posts the payout{partial ? ' for the remaining days' : ''} to the ledger (money leaves the gateway clearing account).</li>
+              <li>Marks this settlement <b>completed</b> — “In settlement” → “Paid” on the merchant’s balances, daily records and ledger.</li>
+            </ul>
+            <div className="dim small" style={{ marginTop: 10 }}>This posts an append-only ledger event and cannot be undone from the UI.</div>
+          </Modal>
+        )
+      })()}
 
       {confirmDayValue && (
         <Modal
@@ -916,10 +945,13 @@ function DailyStatement({
   )
 }
 
-function StatementView({ s, counts }: { s: SettlementDetail; counts: SettlementCounts }) {
+function StatementView({ s, counts, dayPay }: { s: SettlementDetail; counts: SettlementCounts; dayPay: DayPayouts | null }) {
   const b = s.breakdown
   const ccy = s.currency
   const fs = s.fee_schedule
+  const paidMinor = (dayPay?.days ?? []).filter((d) => d.paid).reduce((a, d) => a + d.payout_minor, 0)
+  const remainingMinor = b.net_payout_minor - paidMinor
+  const partial = (dayPay?.days_paid ?? 0) > 0 && s.state !== 'completed'
   return (
     <div className="card statement">
       <div className="statement-head">
@@ -929,6 +961,17 @@ function StatementView({ s, counts }: { s: SettlementDetail; counts: SettlementC
           <div className="win num">
             Window {fmtDate(s.window_start)} → {fmtDate(s.window_end)} · Currency {ccy}
           </div>
+          {partial && (
+            <div className="win num" style={{ color: 'var(--amber)', fontWeight: 600 }}>
+              {fmtInt(dayPay?.days_paid ?? 0)}/{fmtInt(dayPay?.days_total ?? 0)} days paid ·{' '}
+              {fmtMoney(paidMinor, ccy)} paid · {fmtMoney(remainingMinor, ccy)} remaining
+            </div>
+          )}
+          {s.state === 'completed' && (
+            <div className="win num" style={{ color: 'var(--green)', fontWeight: 600 }}>
+              ✓ Paid in full · {fmtMoney(b.net_payout_minor, ccy)}
+            </div>
+          )}
         </div>
         <div style={{ textAlign: 'right' }}>
           <div className="kicker">Counts</div>
