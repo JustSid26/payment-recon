@@ -1047,7 +1047,7 @@ function StatementView({ s, counts, dayPay }: { s: SettlementDetail; counts: Set
             currency={ccy}
             detail={basisLabel(percentBasis(fs?.settlement_fee_bps))}
           />
-          <tr className="total">
+          <tr className={partial ? 'sub' : 'total'}>
             <td className="row-label">
               <span className="op">=</span>NET PAYOUT
             </td>
@@ -1055,6 +1055,24 @@ function StatementView({ s, counts, dayPay }: { s: SettlementDetail; counts: Set
               {fmtMoney(b.net_payout_minor, ccy)}
             </td>
           </tr>
+          {partial && (
+            <>
+              <Row
+                label={`Already paid (${fmtInt(dayPay?.days_paid ?? 0)} day${(dayPay?.days_paid ?? 0) === 1 ? '' : 's'})`}
+                op="−"
+                minor={-paidMinor}
+                currency={ccy}
+              />
+              <tr className="total">
+                <td className="row-label">
+                  <span className="op">=</span>REMAINING PAYOUT
+                </td>
+                <td className={remainingMinor < 0 ? 'money neg' : 'money'}>
+                  {fmtMoney(remainingMinor, ccy)}
+                </td>
+              </tr>
+            </>
+          )}
         </tbody>
       </table>
 
