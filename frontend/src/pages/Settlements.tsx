@@ -110,7 +110,7 @@ export default function Settlements() {
             </div>
           </div>
         ) : (
-          <DailySettlementRecords key={dailyUuid} merchantUuid={dailyUuid} merchantName={dailyName} />
+          <DailySettlementRecords key={dailyUuid} merchantUuid={dailyUuid} merchantName={dailyName} canPayout={isAdmin} />
         )
       ) : (
       <div className="card">

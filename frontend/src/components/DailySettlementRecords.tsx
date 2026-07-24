@@ -89,11 +89,16 @@ function VolumeCell({ volume, approved, declined, onClick }: {
 export default function DailySettlementRecords({
   merchantUuid,
   merchantName = 'merchant',
+  canPayout = false,
 }: {
   merchantUuid: string
   merchantName?: string
+  /** Show per-day Settle/Confirm-payout actions. Only the Settlements section
+   *  enables this; the merchant page and ledger stay status-only (view). */
+  canPayout?: boolean
 }) {
   const isAdmin = getUser()?.role === 'admin'
+  const showPayout = isAdmin && canPayout
   const [ccy, setCcy] = useState('')
   const [dateFrom, setDateFrom] = useState('')
   const [dateTo, setDateTo] = useState('')
@@ -278,7 +283,7 @@ export default function DailySettlementRecords({
         </button>
       ),
     },
-    ...(isAdmin
+    ...(showPayout
       ? ([{ key: 'payout', header: 'Payout', align: 'right', render: payoutCell }] as Column<DailySettlementRow>[])
       : []),
   ]
