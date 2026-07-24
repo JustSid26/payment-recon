@@ -448,3 +448,50 @@ def complete(conn: psycopg.Connection, settlement_id: int) -> dict:
             (event_id, settlement_id),
         )
         return {"settlement_id": settlement_id, "state": "completed"}
+
+
+def cancel(conn: psycopg.Connection, settlement_id: int) -> dict:
+    """Void a *generated* (not yet paid) settlement.
+
+    Append-only reverse of the generation event (net move + settlement-fee legs),
+    then unlink its `settlement_items` so the events become settlement candidates
+    again — this is how a lumped multi-day settlement is broken up so each day can
+    be settled and paid on its own. Refuses once a settlement is completed."""
+    with conn.transaction():
+        cur = conn.cursor()
+        cur.execute("SELECT * FROM settlements WHERE id=%s FOR UPDATE", (settlement_id,))
+        s = cur.fetchone()
+        if s is None:
+            raise SettlementError("not_found", "settlement not found")
+        if s["state"] != "generated":
+            raise SettlementError("invalid_state",
+                                  f"cannot cancel from '{s['state']}' (only a generated, "
+                                  "not-yet-paid settlement can be cancelled)")
+        gen_eid = s["generated_event_id"]
+        if gen_eid is not None:
+            # mirror every leg of the generation event to unwind it exactly
+            cur.execute("""SELECT a.account_type, a.merchant_id, le.direction, le.amount_minor
+                             FROM ledger_entries le JOIN accounts a ON a.id=le.account_id
+                            WHERE le.event_id=%s""", (gen_eid,))
+            legs = [Leg(r["account_type"], r["merchant_id"],
+                        CREDIT if r["direction"] == DEBIT else DEBIT, int(r["amount_minor"]))
+                    for r in cur.fetchall()]
+            if legs:
+                post_event(
+                    conn, event_type="settlement_cancelled", source_type="settlement_cancel",
+                    source_id=str(settlement_id), merchant_id=s["merchant_id"],
+                    currency=s["currency"], occurred_at=datetime.now(timezone.utc),
+                    legs=legs, reverses_event_id=gen_eid,
+                    metadata={"settlement_id": settlement_id},
+                )
+            # drop the settlement-fee revenue record tied to the generated event so a
+            # later per-day re-settle doesn't double-count it
+            cur.execute("DELETE FROM fees WHERE ledger_event_id=%s", (gen_eid,))
+        # free the linked events (settlement_items is operational, not the ledger)
+        cur.execute("DELETE FROM settlement_items WHERE settlement_id=%s", (settlement_id,))
+        # let the same window be generated again (release the run-key idempotency gate)
+        run_key = f"{s['merchant_id']}:{s['currency']}:{s['window_end'].date()}"
+        cur.execute("DELETE FROM posting_idempotency WHERE source_type='settlement_run' "
+                    "AND source_id=%s", (run_key,))
+        cur.execute("UPDATE settlements SET state='cancelled' WHERE id=%s", (settlement_id,))
+        return {"settlement_id": settlement_id, "state": "cancelled"}

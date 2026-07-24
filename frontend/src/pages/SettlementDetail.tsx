@@ -260,6 +260,22 @@ export default function SettlementDetailPage() {
     }
   }
 
+  const [showCancel, setShowCancel] = useState(false)
+  const [cancelling, setCancelling] = useState(false)
+  const cancelSettlement = async () => {
+    setCancelling(true)
+    try {
+      await api(`/api/settlements/${uuid}/cancel`, { method: 'POST' })
+      toastSuccess('Settlement cancelled — its days are free to settle individually')
+      setShowCancel(false)
+      reload()
+    } catch (e) {
+      toastError(e instanceof ApiError ? e.message : 'Failed to cancel settlement')
+    } finally {
+      setCancelling(false)
+    }
+  }
+
   const [emailing, setEmailing] = useState(false)
   const sendConfirmation = async () => {
     setEmailing(true)
@@ -433,9 +449,14 @@ export default function SettlementDetailPage() {
           {isAdmin && (s.state === 'generated' || s.state === 'completed') && (
             <div className="head-actions">
               {s.state === 'generated' ? (
-                <button className="btn primary" onClick={() => setShowConfirm(true)} disabled={completing}>
-                  {completing ? 'Posting payout…' : '✓ Confirm payout'}
-                </button>
+                <>
+                  <button className="btn" onClick={() => setShowCancel(true)} disabled={completing || cancelling}>
+                    Cancel settlement
+                  </button>
+                  <button className="btn primary" onClick={() => setShowConfirm(true)} disabled={completing || cancelling}>
+                    {completing ? 'Posting payout…' : '✓ Confirm payout'}
+                  </button>
+                </>
               ) : (
                 <>
                   <button className="btn success" disabled>
@@ -515,6 +536,31 @@ export default function SettlementDetailPage() {
             <li>Emails the payout confirmation to the merchant (if an email is on file).</li>
           </ul>
           <div className="dim small" style={{ marginTop: 10 }}>This posts an append-only ledger event and cannot be undone from the UI.</div>
+        </Modal>
+      )}
+
+      {showCancel && (
+        <Modal
+          title="Cancel settlement"
+          onClose={() => (cancelling ? null : setShowCancel(false))}
+          footer={
+            <>
+              <button className="btn" onClick={() => setShowCancel(false)} disabled={cancelling}>Keep settlement</button>
+              <button className="btn primary" onClick={() => void cancelSettlement()} disabled={cancelling}
+                      style={{ background: 'var(--red)', borderColor: 'var(--red)' }}>
+                {cancelling ? 'Cancelling…' : 'Cancel settlement'}
+              </button>
+            </>
+          }
+        >
+          <div>
+            Cancel this generated settlement for <b>{s.merchant_name}</b> ({fmtDate(s.window_start)} → {fmtDate(s.window_end)})?
+          </div>
+          <ul className="dim small" style={{ margin: '10px 0 0', paddingLeft: 18, lineHeight: 1.7 }}>
+            <li>Reverses the generation on the ledger (append-only) — payable returns to the merchant’s available balance.</li>
+            <li>Unlinks its {fmtInt(s.items_count)} events so each processing day can be settled and paid <b>individually</b> from the merchant’s Daily records.</li>
+            <li>Only works because it hasn’t been paid yet — a completed payout can’t be cancelled.</li>
+          </ul>
         </Modal>
       )}
     </div>

@@ -13,6 +13,7 @@ const CHIP_COLORS: Record<string, string> = {
   auth_failed: 'red',
   failed: 'red',
   voided: 'red',
+  cancelled: 'red',
   suspended: 'red',
   generated: 'blue',
   initiated: 'blue',

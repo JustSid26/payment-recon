@@ -880,6 +880,24 @@ def complete_settlement(suuid: str, background: BackgroundTasks,
         return settlement_detail(suuid, user)
 
 
+@app.post("/api/settlements/{suuid}/cancel")
+def cancel_settlement(suuid: str, user: dict = Depends(require_admin)):
+    """Void a generated (not-yet-paid) settlement: reverse the generation and
+    unlink its events so they can be re-settled (e.g. per day)."""
+    with get_pool().connection() as conn:
+        cur = conn.cursor()
+        cur.execute("SELECT id FROM settlements WHERE settlement_uuid=%s", (suuid,))
+        s = cur.fetchone()
+        if s is None:
+            err(404, "not_found", "settlement not found")
+        try:
+            settle_mod.cancel(conn, s["id"])
+        except settle_mod.SettlementError as e:
+            err(409, e.code, e.message)
+        conn.commit()
+        return settlement_detail(suuid, user)
+
+
 @app.post("/api/settlements/{suuid}/send-confirmation")
 def send_settlement_confirmation(suuid: str, user: dict = Depends(require_admin)):
     """Manually (re)send the payout-confirmation email — synchronous, returns the
