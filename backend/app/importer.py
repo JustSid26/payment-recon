@@ -63,6 +63,9 @@ def insert_fee_schedule(cur, merchant_id: int, rates: dict) -> None:
 
 STATUS_MAP = {
     "Capture Successful": "captured",
+    "Settled": "captured",                 # newer reports label a cleared capture
+                                           # "Settled" (network-settled) — still a
+                                           # successful capture for our books
     "Auth Failed": "auth_failed",
     "Failed": "auth_failed",
     "Begun Processing": "initiated",

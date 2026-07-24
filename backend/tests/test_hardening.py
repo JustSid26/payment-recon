@@ -113,6 +113,20 @@ def test_hostile_onboard_does_not_strand(conn):
     assert one(conn, "SELECT count(*) c FROM fee_schedules WHERE merchant_id=%s", (mid,))["c"] == 0
 
 
+def test_settled_status_books_as_capture(conn):
+    # newer processor reports use "Settled" for a cleared capture — it must book
+    # ledger events like "Capture Successful", not fall through to unbooked.
+    Importer(conn)._commit_chunk(
+        [{**row("st1", "cana9", "CANAMONEY EXCHANGE LTD"), "Status": "Settled"}], "t.csv", {})
+    t = one(conn, "SELECT id, status FROM transactions WHERE upstream_payment_id='st1'")
+    assert t["status"] == "captured"
+    mid = one(conn, "SELECT merchant_id FROM transactions WHERE id=%s", (t["id"],))["merchant_id"]
+    assert one(conn, "SELECT count(*) c FROM ledger_events WHERE source_txn_id=%s "
+               "AND event_type='payment_captured'", (t["id"],))["c"] == 1
+    assert one(conn, "SELECT count(*) c FROM fees WHERE merchant_id=%s AND fee_type='mdr'",
+               (mid,))["c"] == 1
+
+
 def test_small_capture_clamps_instead_of_crashing(conn):
     # a $0.20 capture under a preset whose fixed fee (0.35) exceeds it
     Importer(conn)._commit_chunk([row("sm", "S1", "SmallTicket", cap="0.20")], "t.csv", {})
