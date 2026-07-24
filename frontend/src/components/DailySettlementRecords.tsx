@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react'
-import { Link } from 'react-router-dom'
+import { Link, useNavigate } from 'react-router-dom'
 import { api, ApiError, getUser } from '../lib/api'
 import { useApi } from '../lib/useApi'
 import type { DailySettlementResp, DailySettlementRow, GenerateSkipped, SettlementDetail, SettlementLineItem } from '../lib/types'
@@ -99,6 +99,7 @@ export default function DailySettlementRecords({
 }) {
   const isAdmin = getUser()?.role === 'admin'
   const showPayout = isAdmin && canPayout
+  const navigate = useNavigate()
   const [ccy, setCcy] = useState('')
   const [dateFrom, setDateFrom] = useState('')
   const [dateTo, setDateTo] = useState('')
@@ -167,32 +168,26 @@ export default function DailySettlementRecords({
     }
   }
 
-  // ---- per-day settlement: generate one day, then confirm its payout ----
-  const generateDay = async (date: string) => {
+  // ---- per-day settlement: generate this day's settlement, then open its report
+  // to confirm the payout there (the ONLY place a payout is confirmed). We never
+  // confirm from this list — that would complete whatever settlement the day
+  // belongs to, including a lumped multi-day one.
+  const settleDay = async (date: string) => {
     setPayoutBusy(date)
     try {
       const res = await api<SettlementDetail | GenerateSkipped>('/api/settlements/generate', {
         method: 'POST',
         body: { merchant_uuid: merchantUuid, currency, window_start: date, window_end: date },
       })
-      if ('skipped' in res && res.skipped) toastError(`${fmtDate(date)} — ${res.reason}`)
-      else toastSuccess(`${fmtDate(date)} settled — confirm the payout to pay it out`)
-      reload()
+      if ('skipped' in res && res.skipped) {
+        toastError(`${fmtDate(date)} — ${res.reason}`)
+        reload()
+      } else {
+        toastSuccess(`${fmtDate(date)} settled — confirm the payout in the day-wise report`)
+        navigate(`/settlements/${(res as SettlementDetail).settlement_uuid}`)
+      }
     } catch (e) {
-      toastError(e instanceof ApiError ? e.message : 'Failed to generate settlement')
-    } finally {
-      setPayoutBusy(null)
-    }
-  }
-
-  const confirmDay = async (settlementUuid: string, date: string) => {
-    setPayoutBusy(date)
-    try {
-      await api(`/api/settlements/${settlementUuid}/complete`, { method: 'POST' })
-      toastSuccess(`Payout confirmed for ${fmtDate(date)}`)
-      reload()
-    } catch (e) {
-      toastError(e instanceof ApiError ? e.message : 'Failed to confirm payout')
+      toastError(e instanceof ApiError ? e.message : 'Failed to settle this day')
     } finally {
       setPayoutBusy(null)
     }
@@ -201,16 +196,17 @@ export default function DailySettlementRecords({
   const payoutCell = (r: DailySettlementRow) => {
     if (payoutBusy === r.date) return <span className="dim small">…</span>
     if (r.status === 'paid') return <span className="pay-pill paid">Paid</span>
-    if (r.settlement_uuid && (r.status === 'in_settlement' || r.status === 'partial')) {
+    if (r.settlement_uuid) {
+      // already in a settlement — review it; confirm happens in the report
       return (
-        <button className="btn primary sm" onClick={(e) => { e.stopPropagation(); void confirmDay(r.settlement_uuid!, r.date) }}>
-          ✓ Confirm payout
-        </button>
+        <Link to={`/settlements/${r.settlement_uuid}`} className="small" onClick={(e) => e.stopPropagation()}>
+          Review →
+        </Link>
       )
     }
     if (r.status === 'pending' && r.net_payable_minor > 0) {
       return (
-        <button className="btn sm" onClick={(e) => { e.stopPropagation(); void generateDay(r.date) }}>
+        <button className="btn sm" onClick={(e) => { e.stopPropagation(); void settleDay(r.date) }}>
           Settle day
         </button>
       )

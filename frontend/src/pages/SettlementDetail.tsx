@@ -449,14 +449,9 @@ export default function SettlementDetailPage() {
           {isAdmin && (s.state === 'generated' || s.state === 'completed') && (
             <div className="head-actions">
               {s.state === 'generated' ? (
-                <>
-                  <button className="btn" onClick={() => setShowCancel(true)} disabled={completing || cancelling}>
-                    Cancel settlement
-                  </button>
-                  <button className="btn primary" onClick={() => setShowConfirm(true)} disabled={completing || cancelling}>
-                    {completing ? 'Posting payout…' : '✓ Confirm payout'}
-                  </button>
-                </>
+                <button className="btn" onClick={() => setShowCancel(true)} disabled={completing || cancelling}>
+                  Cancel settlement
+                </button>
               ) : (
                 <>
                   <button className="btn success" disabled>
@@ -638,7 +633,7 @@ function DailyView({ days, loading, s, items, baseName, canConfirm, onConfirm }:
               : `${fmtInt(days.length)} days awaiting one payout of ${fmtMoney(payout, ccy)}`}
           </div>
           {canConfirm && (
-            <button className="btn primary sm" style={{ marginTop: 10, alignSelf: 'flex-start' }} onClick={onConfirm}>
+            <button className="btn primary" style={{ marginTop: 12, alignSelf: 'flex-start' }} onClick={onConfirm}>
               ✓ Confirm payout
             </button>
           )}
