@@ -52,6 +52,44 @@ def known_rates(member_id: str, name: str) -> dict | None:
     return None
 
 
+def _norm_name(name: str) -> str:
+    return (name or "").strip().lower()
+
+
+def remembered_rates(cur, member_id: str, name: str) -> dict | None:
+    """A fee schedule previously applied to this merchant id or name, so a
+    re-import (or a fresh merchant sharing the id/name) reuses it instead of being
+    quarantined. member_id match wins over name."""
+    for mtype, key in (("member_id", member_id), ("name", _norm_name(name))):
+        if not key:
+            continue
+        cur.execute(
+            f"SELECT {', '.join(FEE_COLUMNS)} FROM fee_schedule_memory "
+            "WHERE match_type=%s AND match_key=%s", (mtype, key),
+        )
+        row = cur.fetchone()
+        if row:
+            return {c: row[c] for c in FEE_COLUMNS}
+    return None
+
+
+def remember_rates(cur, member_id: str, name: str, rates: dict) -> None:
+    """Record the fee schedule applied to a merchant, under both its member_id and
+    name, so future imports of the same merchant auto-configure the same way."""
+    cols = ", ".join(FEE_COLUMNS)
+    vals = ", ".join(f"%({c})s" for c in FEE_COLUMNS)
+    upd = ", ".join(f"{c}=EXCLUDED.{c}" for c in FEE_COLUMNS)
+    for mtype, key in (("member_id", member_id), ("name", _norm_name(name))):
+        if not key:
+            continue
+        cur.execute(
+            f"INSERT INTO fee_schedule_memory (match_type, match_key, {cols}) "
+            f"VALUES (%(mt)s, %(mk)s, {vals}) "
+            f"ON CONFLICT (match_type, match_key) DO UPDATE SET {upd}, updated_at=now()",
+            dict(mt=mtype, mk=key, **{c: rates[c] for c in FEE_COLUMNS}),
+        )
+
+
 def insert_fee_schedule(cur, merchant_id: int, rates: dict) -> None:
     cols = ", ".join(FEE_COLUMNS)
     vals = ", ".join(f"%({c})s" for c in FEE_COLUMNS)
@@ -122,6 +160,7 @@ class Importer:
         self.schedules: dict[int, dict] = {}
         self.stats = dict(txns=0, captures=0, declines=0, refunds=0, skipped_dupes=0,
                           unmatched_refunds=0, quarantined=0, quarantined_merchants=0,
+                          remembered_merchants=0,
                           skipped_bad_currency=0, skipped_bad_date=0, negative_amount=0)
 
     # -- merchants -----------------------------------------------------------
@@ -133,7 +172,13 @@ class Importer:
         row = cur.fetchone()
         if row is None:
             display = name or f"Member {member_id}"
+            # documented clients auto-configure; otherwise reuse a fee schedule we
+            # remember for this merchant id/name from a previous onboarding.
             rates = known_rates(member_id, display)
+            from_memory = False
+            if rates is None:
+                rates = remembered_rates(cur, member_id, display)
+                from_memory = rates is not None
             status = "active" if rates else "unconfigured"
             cur.execute(
                 "INSERT INTO merchants (member_id, name, status) VALUES (%s,%s,%s) "
@@ -143,6 +188,8 @@ class Importer:
             row = cur.fetchone()
             if rates:
                 insert_fee_schedule(cur, row["id"], rates)
+                if from_memory:
+                    self.stats["remembered_merchants"] += 1
             else:
                 self.stats["quarantined_merchants"] += 1
         self.merchants[member_id] = row

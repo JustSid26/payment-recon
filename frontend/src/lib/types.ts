@@ -483,6 +483,7 @@ export interface UploadStats {
   unmatched_refunds: number
   quarantined: number
   quarantined_merchants: number
+  remembered_merchants?: number
 }
 
 export interface UploadIntegrity {

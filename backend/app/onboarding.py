@@ -10,7 +10,8 @@ from __future__ import annotations
 
 import psycopg
 
-from .importer import Importer, insert_fee_schedule, WORKBOOK_RATES, ANNEX_RATES, FEE_COLUMNS
+from .importer import (Importer, insert_fee_schedule, remember_rates,
+                       WORKBOOK_RATES, ANNEX_RATES, FEE_COLUMNS)
 from .ledger import BulkPoster, AccountCache, Leg, DEBIT, CREDIT, post_event
 
 # Named rate cards the onboarding UI/CLI can pick from, plus fully custom rates.
@@ -67,6 +68,11 @@ def assign_fee_schedule(conn: psycopg.Connection, merchant_id: int, rates: dict,
         cur.execute("DELETE FROM fee_schedules WHERE merchant_id=%s", (merchant_id,))
         insert_fee_schedule(cur, merchant_id, rates)
         cur.execute("UPDATE merchants SET status='active' WHERE id=%s", (merchant_id,))
+        # remember this config so a future import of the same merchant id/name
+        # (e.g. after a reset) auto-configures instead of quarantining.
+        cur.execute("SELECT member_id, name FROM merchants WHERE id=%s", (merchant_id,))
+        m = cur.fetchone()
+        remember_rates(cur, m["member_id"], m["name"], rates)
         repriced = _reverse_posted(conn, cur, merchant_id) if reprocess else 0
         posted = _reprocess_body(conn, cur, merchant_id) if reprocess else 0
     return {"merchant_id": merchant_id, "transactions_posted": posted,

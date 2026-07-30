@@ -87,6 +87,33 @@ def test_onboarding_posts_at_configured_rate(conn):
                )["fee_minor"] == 3_000
 
 
+def test_fee_config_remembered_and_reapplied(conn):
+    from app.importer import remembered_rates
+    # onboard an unknown merchant at custom rates → the config is remembered
+    Importer(conn)._commit_chunk([row("mem1", "55001", "Remember Co")], "t.csv", {})
+    mid = one(conn, "SELECT id FROM merchants WHERE member_id='55001'")["id"]
+    ob.assign_fee_schedule(conn, mid, ob.resolve_rates(
+        overrides={"mdr_bps": 300, "settlement_fee_bps": 100}))
+
+    # remembered under both member_id and (normalised) name
+    cur = conn.cursor()
+    assert remembered_rates(cur, "55001", "irrelevant")["mdr_bps"] == 300
+    assert remembered_rates(cur, "nomatch", "REMEMBER CO")["mdr_bps"] == 300
+    assert remembered_rates(cur, "nope", "no such name") is None
+
+    # a NEW merchant (different id) with the SAME name auto-configures from memory —
+    # active, booked at the remembered 3% MDR, NOT quarantined
+    imp = Importer(conn)
+    imp._commit_chunk([row("mem2", "55002", "Remember Co")], "t.csv", {})
+    m2 = one(conn, "SELECT id, status FROM merchants WHERE member_id='55002'")
+    assert m2["status"] == "active"
+    assert imp.stats["remembered_merchants"] == 1
+    assert one(conn, "SELECT ledger_posted FROM transactions WHERE upstream_payment_id='mem2'"
+               )["ledger_posted"] is True
+    assert one(conn, "SELECT fee_minor FROM fees WHERE merchant_id=%s AND fee_type='mdr'",
+               (m2["id"],))["fee_minor"] == 3000  # 3% of 1000.00, not quarantined
+
+
 def test_onboarding_is_idempotent(conn):
     mid = one(conn, "SELECT id FROM merchants WHERE member_id='99002'")["id"]
     assert ob.reprocess_merchant(conn, mid) == 0  # nothing left quarantined

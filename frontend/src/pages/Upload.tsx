@@ -188,6 +188,17 @@ export default function Upload() {
                 ))}
               </div>
 
+              {/* Auto-configured from remembered fee schedules */}
+              {(result.stats.remembered_merchants ?? 0) > 0 && (
+                <div className="callout" style={{ background: 'var(--green-bg)', borderColor: 'var(--green-border)' }}>
+                  <span>
+                    <b>{fmtInt(result.stats.remembered_merchants ?? 0)}</b> merchant
+                    {(result.stats.remembered_merchants ?? 0) === 1 ? '' : 's'} auto-configured from a
+                    remembered fee schedule (matched a previously-set merchant id or name).
+                  </span>
+                </div>
+              )}
+
               {/* Quarantine notice — imported but not booked (unknown merchants) */}
               {result.stats.quarantined > 0 && (
                 <div className="callout amber" onClick={() => navigate('/merchants')} style={{ cursor: 'pointer' }}>

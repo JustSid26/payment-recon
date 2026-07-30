@@ -246,6 +246,29 @@ ALTER TABLE transactions DROP CONSTRAINT IF EXISTS transactions_upstream_payment
 CREATE UNIQUE INDEX IF NOT EXISTS ux_txn_merchant_payment
   ON transactions (merchant_id, upstream_payment_id);
 
+-- Fee-config memory: remembers the fee schedule last applied to a merchant,
+-- keyed by BOTH its member_id and its (normalised) name. On import, an unknown
+-- merchant whose id or name matches a remembered config is auto-configured with
+-- it instead of being quarantined — so a re-import (or a fresh merchant with the
+-- same id/name) reuses the fees you set before. Deliberately has NO FK to
+-- merchants, so a "Reset demo" (which truncates merchants) does NOT wipe it.
+CREATE TABLE IF NOT EXISTS fee_schedule_memory (
+  match_type              TEXT NOT NULL CHECK (match_type IN ('member_id','name')),
+  match_key               TEXT NOT NULL,
+  mdr_bps                 INT NOT NULL,
+  approved_txn_fee_minor  BIGINT NOT NULL,
+  declined_txn_fee_minor  BIGINT NOT NULL,
+  refund_fee_minor        BIGINT NOT NULL,
+  chargeback_fee_minor    BIGINT NOT NULL,
+  reserve_hold_bps        INT NOT NULL,
+  reserve_hold_days       INT NOT NULL,
+  settlement_fee_bps      INT NOT NULL,
+  settlement_delay_days   INT NOT NULL DEFAULT 0,
+  settlement_schedule     TEXT NOT NULL DEFAULT 'daily',
+  updated_at              TIMESTAMPTZ NOT NULL DEFAULT now(),
+  PRIMARY KEY (match_type, match_key)
+);
+
 -- Reusable, named fee presets (e.g. Workbook, Canamoney) for onboarding merchants.
 CREATE TABLE IF NOT EXISTS fee_presets (
   name                    TEXT PRIMARY KEY,
