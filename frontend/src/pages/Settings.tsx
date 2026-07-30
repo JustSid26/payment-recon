@@ -18,6 +18,7 @@ export default function Settings() {
   const [testTo, setTestTo] = useState('')
   const [testing, setTesting] = useState(false)
   const [testResult, setTestResult] = useState<MailSendResult | null>(null)
+  const [connecting, setConnecting] = useState(false)
 
   useEffect(() => {
     if (!data) return
@@ -27,6 +28,32 @@ export default function Settings() {
     setClientSecret('')
     setRefreshToken('')
   }, [data])
+
+  // Handle the return from the Google "Connect Gmail" redirect.
+  useEffect(() => {
+    const p = new URLSearchParams(window.location.search)
+    if (p.get('mail_connected')) {
+      toastSuccess('Gmail connected — the refresh token was saved and sending is enabled')
+      reload()
+    } else if (p.get('mail_error')) {
+      toastError(`Gmail connect failed: ${p.get('mail_error')}`)
+    }
+    if (p.get('mail_connected') || p.get('mail_error')) {
+      window.history.replaceState({}, '', '/settings')
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  const connectGmail = async () => {
+    setConnecting(true)
+    try {
+      const res = await api<{ auth_url: string }>('/api/settings/mail/oauth/start')
+      window.location.href = res.auth_url
+    } catch (e) {
+      toastError(e instanceof ApiError ? e.message : 'Could not start Google connect — save the client id/secret first')
+      setConnecting(false)
+    }
+  }
 
   const secretSet = (k: 'TW_GMAIL_CLIENT_SECRET' | 'TW_GMAIL_REFRESH_TOKEN') =>
     data?.config[k].set ?? false
@@ -159,21 +186,31 @@ export default function Settings() {
               <div className="field">
                 <label>
                   Gmail refresh token{' '}
-                  <span className="dim">{secretSet('TW_GMAIL_REFRESH_TOKEN') ? '· saved' : '· not set'}</span>
+                  <span className="dim">{secretSet('TW_GMAIL_REFRESH_TOKEN') ? '· saved' : '· not set — use “Connect Gmail”'}</span>
                 </label>
                 <input
                   className="input"
                   type="password"
                   autoComplete="new-password"
-                  placeholder={secretSet('TW_GMAIL_REFRESH_TOKEN') ? 'Leave blank to keep current' : 'Paste refresh token'}
+                  placeholder={secretSet('TW_GMAIL_REFRESH_TOKEN') ? 'Leave blank to keep current' : 'Paste, or click Connect Gmail →'}
                   value={refreshToken}
                   onChange={(e) => setRefreshToken(e.target.value)}
                 />
               </div>
 
-              <div className="head-actions" style={{ marginTop: 4 }}>
+              <div className="callout" style={{ marginTop: 4 }}>
+                <span>
+                  <b>Easiest:</b> with the client id/secret saved, click <b>Connect Gmail</b> to authorize the
+                  sending account with Google — the refresh token is captured automatically (no copy-paste).
+                </span>
+              </div>
+
+              <div className="head-actions" style={{ marginTop: 4, gap: 8 }}>
                 <button className="btn primary" onClick={() => void save()} disabled={saving}>
                   {saving ? 'Saving…' : 'Save settings'}
+                </button>
+                <button className="btn" onClick={() => void connectGmail()} disabled={connecting || saving}>
+                  {connecting ? 'Redirecting…' : '🔗 Connect Gmail'}
                 </button>
                 </div>
               </div>

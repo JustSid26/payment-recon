@@ -3,10 +3,14 @@ from __future__ import annotations
 from datetime import datetime, timezone
 import json
 import time
+import urllib.parse
 import urllib.request
 
-from fastapi import BackgroundTasks, Depends, FastAPI, HTTPException, Query
+import jwt
+
+from fastapi import BackgroundTasks, Depends, FastAPI, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import RedirectResponse
 from pydantic import BaseModel
 
 from . import auth as auth_mod
@@ -1033,6 +1037,78 @@ def send_mail_test(body: MailTestBody, user: dict = Depends(require_admin)):
         f"<b>{mailer_mod.status().get('from') or 'this account'}</b>.</p>"
     )
     return mailer_mod.send(body.to, "TransactWorld — test email", html)
+
+
+# ---- Gmail OAuth "Connect" flow (mint the refresh token via the live app) ----
+_GMAIL_SEND_SCOPE = "https://www.googleapis.com/auth/gmail.send"
+
+
+def _public_base(request: Request) -> str:
+    """Public origin of this app (behind Caddy/Cloudflare), for the redirect URI."""
+    host = request.headers.get("x-forwarded-host") or request.headers.get("host") or "app.paymentrecon.site"
+    proto = request.headers.get("x-forwarded-proto") or ("http" if host.startswith("localhost") else "https")
+    return f"{proto}://{host}"
+
+
+def _oauth_redirect_uri(request: Request) -> str:
+    return _public_base(request) + "/api/settings/mail/oauth/callback"
+
+
+@app.get("/api/settings/mail/oauth/start")
+def mail_oauth_start(request: Request, user: dict = Depends(require_admin)):
+    """Return the Google consent URL to connect the sending account. The client id
+    (and secret, used later) must already be saved in the mail settings."""
+    client_id = mailer_mod._cfg("TW_GMAIL_CLIENT_ID")
+    if not client_id:
+        err(400, "no_client", "Save the Gmail OAuth client id and secret first.")
+    redirect_uri = _oauth_redirect_uri(request)
+    state = jwt.encode({"typ": "mail_oauth", "exp": int(time.time()) + 600},
+                       auth_mod.SECRET, algorithm="HS256")
+    auth_url = "https://accounts.google.com/o/oauth2/v2/auth?" + urllib.parse.urlencode({
+        "client_id": client_id, "redirect_uri": redirect_uri, "response_type": "code",
+        "scope": _GMAIL_SEND_SCOPE, "access_type": "offline", "prompt": "consent",
+        "state": state,
+    })
+    return {"auth_url": auth_url, "redirect_uri": redirect_uri}
+
+
+@app.get("/api/settings/mail/oauth/callback")
+def mail_oauth_callback(request: Request, code: str | None = None,
+                        state: str | None = None, error: str | None = None):
+    """Google redirects the browser here. Exchange the code for a refresh token
+    server-side and store it in the mail settings, then bounce back to /settings."""
+    base = _public_base(request)
+
+    def back(flag: str) -> RedirectResponse:
+        return RedirectResponse(base + "/settings?" + flag, status_code=302)
+
+    if error or not code or not state:
+        return back("mail_error=" + urllib.parse.quote(error or "no_code"))
+    try:
+        jwt.decode(state, auth_mod.SECRET, algorithms=["HS256"])
+    except jwt.PyJWTError:
+        return back("mail_error=bad_state")
+    client_id = mailer_mod._cfg("TW_GMAIL_CLIENT_ID")
+    client_secret = mailer_mod._cfg("TW_GMAIL_CLIENT_SECRET")
+    if not client_id or not client_secret:
+        return back("mail_error=no_client")
+    data = urllib.parse.urlencode({
+        "code": code, "client_id": client_id, "client_secret": client_secret,
+        "redirect_uri": _oauth_redirect_uri(request), "grant_type": "authorization_code",
+    }).encode()
+    try:
+        req = urllib.request.Request("https://oauth2.googleapis.com/token", data=data,
+                                     headers={"Content-Type": "application/x-www-form-urlencoded"})
+        with urllib.request.urlopen(req, timeout=15) as resp:
+            tok = json.loads(resp.read().decode("utf-8"))
+    except Exception:
+        return back("mail_error=exchange_failed")
+    rt = tok.get("refresh_token")
+    if not rt:
+        return back("mail_error=no_refresh_token")
+    with get_pool().connection() as conn:
+        settings_store_mod.save(conn, {"TW_GMAIL_REFRESH_TOKEN": rt, "TW_MAIL_ENABLED": ""})
+    return back("mail_connected=1")
 
 
 class CycleBody(BaseModel):
