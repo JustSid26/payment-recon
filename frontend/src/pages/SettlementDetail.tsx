@@ -305,14 +305,18 @@ export default function SettlementDetailPage() {
     }
   }
 
+  // Sends open a confirm dialog first (they email the merchant), so a misclick
+  // can't fire — and the dialog states the scope: whole settlement vs one day.
+  const [sendDayValue, setSendDayValue] = useState<string | null>(null)
   const [sendingDay, setSendingDay] = useState(false)
-  const sendDayReport = async (day: string) => {
+  const doSendDay = async (day: string) => {
     setSendingDay(true)
     try {
       const res = await api<{ sent: boolean; reason?: string; to?: string }>(
         `/api/settlements/${uuid}/days/${day}/send-confirmation`, { method: 'POST' })
       if (res.sent) toastSuccess(`Day report for ${fmtDate(day)} sent${res.to ? ` to ${res.to}` : ''}`)
       else toastError(`Not sent — ${res.reason ?? 'unknown reason'}`)
+      setSendDayValue(null)
     } catch (e) {
       toastError(e instanceof ApiError ? e.message : 'Failed to send day report')
     } finally {
@@ -320,16 +324,18 @@ export default function SettlementDetailPage() {
     }
   }
 
+  const [showSendReport, setShowSendReport] = useState(false)
   const [emailing, setEmailing] = useState(false)
   const sendConfirmation = async () => {
     setEmailing(true)
     try {
       const res = await api<{ sent: boolean; reason?: string; to?: string }>(
         `/api/settlements/${uuid}/send-confirmation`, { method: 'POST' })
-      if (res.sent) toastSuccess(`Payout confirmation sent${res.to ? ` to ${res.to}` : ''}`)
+      if (res.sent) toastSuccess(`Full report sent${res.to ? ` to ${res.to}` : ''}`)
       else toastError(`Not sent — ${res.reason ?? 'unknown reason'}`)
+      setShowSendReport(false)
     } catch (e) {
-      toastError(e instanceof ApiError ? e.message : 'Failed to send confirmation')
+      toastError(e instanceof ApiError ? e.message : 'Failed to send report')
     } finally {
       setEmailing(false)
     }
@@ -495,9 +501,10 @@ export default function SettlementDetailPage() {
           </div>
           {isAdmin && (
             <div className="head-actions">
-              <button className="btn" onClick={() => void sendConfirmation()} disabled={emailing}
+              <span className="scope-tag" title="These buttons act on the WHOLE settlement">Whole settlement</span>
+              <button className="btn" onClick={() => setShowSendReport(true)} disabled={emailing}
                       title="Email the whole-settlement report (PDF + Excel) to the merchant">
-                {emailing ? 'Sending…' : '✉ Send report'}
+                {emailing ? 'Sending…' : '✉ Send full report'}
               </button>
               {s.state === 'generated' && (
                 <>
@@ -505,7 +512,7 @@ export default function SettlementDetailPage() {
                     Cancel settlement
                   </button>
                   <button className="btn primary" onClick={() => setShowConfirm(true)} disabled={completing || cancelling}>
-                    {completing ? 'Posting payout…' : '✓ Confirm payout'}
+                    {completing ? 'Posting payout…' : '✓ Confirm whole payout'}
                   </button>
                 </>
               )}
@@ -557,7 +564,7 @@ export default function SettlementDetailPage() {
           onConfirmDay={(day) => setConfirmDayValue(day)}
           isAdmin={isAdmin}
           sendingDay={sendingDay}
-          onSendDay={sendDayReport}
+          onSendDay={(day) => setSendDayValue(day)}
         />
       ) : (
         <LinesView items={items} loading={lines.loading} ccy={ccy} />
@@ -572,7 +579,7 @@ export default function SettlementDetailPage() {
           : b.net_payout_minor
         return (
           <Modal
-            title="Confirm payout"
+            title="Confirm whole-settlement payout"
             onClose={() => (completing ? null : setShowConfirm(false))}
             footer={
               <>
@@ -650,6 +657,53 @@ export default function SettlementDetailPage() {
             <li>Reverses the generation on the ledger (append-only) — payable returns to the merchant’s available balance.</li>
             <li>Unlinks its {fmtInt(s.items_count)} events so each processing day can be settled and paid <b>individually</b> from the merchant’s Daily records.</li>
             <li>Only works because it hasn’t been paid yet — a completed payout can’t be cancelled.</li>
+          </ul>
+        </Modal>
+      )}
+
+      {showSendReport && (
+        <Modal
+          title="Send full settlement report"
+          onClose={() => (emailing ? null : setShowSendReport(false))}
+          footer={
+            <>
+              <button className="btn" onClick={() => setShowSendReport(false)} disabled={emailing}>Cancel</button>
+              <button className="btn primary" onClick={() => void sendConfirmation()} disabled={emailing}>
+                {emailing ? 'Sending…' : '✉ Send full report'}
+              </button>
+            </>
+          }
+        >
+          <div>
+            Email the <b>whole settlement</b> report to <b>{s.merchant_name}</b>’s payout email?
+          </div>
+          <ul className="dim small" style={{ margin: '10px 0 0', paddingLeft: 18, lineHeight: 1.7 }}>
+            <li>Covers the entire window {fmtDate(s.window_start)} → {fmtDate(s.window_end)} ({fmtInt(s.items_count)} items).</li>
+            <li>Attaches the full report (PDF) + all transactions (Excel), code <b className="mono">{s.confirmation_code}</b>.</li>
+            <li>This is the <b>whole</b> report — to email just one day, use “Send day report” in the Day-wise tab.</li>
+          </ul>
+        </Modal>
+      )}
+
+      {sendDayValue && (
+        <Modal
+          title="Send day report"
+          onClose={() => (sendingDay ? null : setSendDayValue(null))}
+          footer={
+            <>
+              <button className="btn" onClick={() => setSendDayValue(null)} disabled={sendingDay}>Cancel</button>
+              <button className="btn primary" onClick={() => void doSendDay(sendDayValue)} disabled={sendingDay}>
+                {sendingDay ? 'Sending…' : '✉ Send day report'}
+              </button>
+            </>
+          }
+        >
+          <div>
+            Email the report for <b>just {fmtDate(sendDayValue)}</b> to <b>{s.merchant_name}</b>’s payout email?
+          </div>
+          <ul className="dim small" style={{ margin: '10px 0 0', paddingLeft: 18, lineHeight: 1.7 }}>
+            <li>Covers <b>only this one day</b> — that day’s breakdown (PDF) + that day’s transactions (Excel).</li>
+            <li>Not the whole settlement.</li>
           </ul>
         </Modal>
       )}
@@ -741,7 +795,7 @@ function DailyView({ days, loading, s, items, baseName, canConfirm, onConfirm, d
           </div>
           {canConfirm && !perDayAvailable && (
             <button className="btn primary" style={{ marginTop: 12, alignSelf: 'flex-start' }} onClick={onConfirm}>
-              ✓ Confirm payout
+              ✓ Confirm whole payout
             </button>
           )}
         </div>
@@ -892,7 +946,7 @@ function DailyStatement({
             </div>
             {canConfirmDay && (
               <button className="btn primary sm" style={{ marginTop: 10 }} disabled={confirming} onClick={onConfirmDay}>
-                ✓ Confirm payout
+                ✓ Confirm this day only
               </button>
             )}
           </div>

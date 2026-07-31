@@ -1118,3 +1118,8 @@ table.data tbody tr.click:hover { background: #f8faff; }
 .chart-box { padding: 14px 16px 8px; height: 300px; }
 
 .head-actions { display: flex; gap: 10px; align-items: center; }
+.scope-tag {
+  font-size: 10px; font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase;
+  color: var(--ink-3); background: var(--gray-bg); border: 1px solid var(--border);
+  padding: 3px 8px; border-radius: 999px; white-space: nowrap;
+}
