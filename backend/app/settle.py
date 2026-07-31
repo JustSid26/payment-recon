@@ -154,11 +154,16 @@ def generate(conn: psycopg.Connection, *, merchant_id: int, currency: str,
         sid = cur.fetchone()["id"]
         # Stable, merchant-facing confirmation code (on every settlement from
         # generation) — quoted in the payout report so a merchant can look the
-        # settlement up by it. Derived from the settlement uuid so it's unique.
-        cur.execute(
-            "UPDATE settlements SET confirmation_code = "
-            "'TW-' || upper(substr(replace(settlement_uuid::text,'-',''),1,10)) "
-            "WHERE id=%s", (sid,))
+        # settlement up by it. Derived from the settlement uuid (unique); on the
+        # astronomically unlikely 10-char clash, fall back to the full uuid hex so
+        # the code is guaranteed unique (enforced by a UNIQUE index).
+        cur.execute("SELECT settlement_uuid FROM settlements WHERE id=%s", (sid,))
+        uhex = cur.fetchone()["settlement_uuid"].hex
+        code = "TW-" + uhex[:10].upper()
+        cur.execute("SELECT 1 FROM settlements WHERE confirmation_code=%s", (code,))
+        if cur.fetchone():
+            code = "TW-" + uhex.upper()
+        cur.execute("UPDATE settlements SET confirmation_code=%s WHERE id=%s", (code, sid))
         cur.executemany(
             "INSERT INTO settlement_items (settlement_id, event_id, payable_delta_minor) "
             "VALUES (%s,%s,%s)",

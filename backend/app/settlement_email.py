@@ -18,7 +18,7 @@ import html as _html
 import psycopg
 
 from . import mailer
-from .money import fmt
+from .money import fmt, exponent
 from .settle import line_items
 
 # breakdown label → key, in report order. Rows that are zero are hidden.
@@ -111,6 +111,111 @@ def _items_html(ccy: str, items: list[dict], limit: int = 100) -> str:
     return f"<table style='border-collapse:collapse;width:100%;font-size:13px'>{head}{''.join(body)}{extra}</table>"
 
 
+# ---- attachments: PDF report + Excel transaction list (no third-party deps) ----
+def _pdf(content: str) -> bytes:
+    """Minimal single-page PDF from a content stream (Courier / Courier-Bold)."""
+    objs = [
+        "<</Type/Catalog/Pages 2 0 R>>",
+        "<</Type/Pages/Kids[3 0 R]/Count 1>>",
+        "<</Type/Page/Parent 2 0 R/MediaBox[0 0 595 842]"
+        "/Resources<</Font<</F1 5 0 R/F2 6 0 R>>>>/Contents 4 0 R>>",
+        ("stream", content.encode("latin-1", "replace")),
+        "<</Type/Font/Subtype/Type1/BaseFont/Courier>>",
+        "<</Type/Font/Subtype/Type1/BaseFont/Courier-Bold>>",
+    ]
+    out = b"%PDF-1.4\n"
+    offsets = []
+    for i, o in enumerate(objs, start=1):
+        offsets.append(len(out))
+        if isinstance(o, tuple):
+            s = o[1]
+            out += f"{i} 0 obj\n<</Length {len(s)}>>\nstream\n".encode("latin-1")
+            out += s + b"\nendstream\nendobj\n"
+        else:
+            out += f"{i} 0 obj\n{o}\nendobj\n".encode("latin-1")
+    xref = len(out)
+    n = len(objs) + 1
+    out += f"xref\n0 {n}\n0000000000 65535 f \n".encode("latin-1")
+    for off in offsets:
+        out += f"{off:010d} 00000 n \n".encode("latin-1")
+    out += f"trailer\n<</Size {n}/Root 1 0 R>>\nstartxref\n{xref}\n%%EOF".encode("latin-1")
+    return out
+
+
+def _pdf_report(merchant: str, ccy: str, code: str, window: str,
+                counts: dict, bd: dict, net_minor: int) -> bytes:
+    ops: list[str] = []
+
+    def esc(s: str) -> str:
+        return s.replace("\\", "\\\\").replace("(", "\\(").replace(")", "\\)")
+
+    def txt(x: float, y: float, s: str, size: int = 10, bold: bool = False) -> None:
+        ops.append(f"BT {'/F2' if bold else '/F1'} {size} Tf {x:.2f} {y:.2f} Td ({esc(s)}) Tj ET")
+
+    def right(y: float, s: str, size: int = 10, bold: bool = False) -> None:
+        txt(545 - len(s) * size * 0.6, y, s, size, bold)  # Courier is fixed-width
+
+    y = 800
+    txt(50, y, "TransactWorld  -  Settlement statement", 15, True); y -= 26
+    txt(50, y, f"Merchant: {merchant}", 10); y -= 15
+    txt(50, y, f"Currency: {ccy}    Window: {window}", 10); y -= 15
+    txt(50, y, f"Confirmation code: {code}", 11, True); y -= 15
+    txt(50, y, f"Counts: Paid {counts.get('paid', 0)}   Declined {counts.get('declined', 0)}"
+               f"   Refunds {counts.get('refunds', 0)}   Chargebacks {counts.get('chargebacks', 0)}", 10)
+    y -= 12
+    ops.append(f"BT /F1 10 Tf 50 {y:.2f} Td (" + "-" * 78 + ") Tj ET"); y -= 16
+    for label, key in _REPORT_ROWS:
+        val = int(bd.get(key, 0) or 0)
+        if val == 0 and key not in ("gross_captured_minor", "subtotal_minor"):
+            continue
+        bold = key == "subtotal_minor"
+        txt(55, y, label, 10, bold)
+        right(y, f"{fmt(val, ccy)} {ccy}", 10, bold)
+        y -= 15
+    y -= 4
+    ops.append(f"BT /F1 10 Tf 50 {y:.2f} Td (" + "-" * 78 + ") Tj ET"); y -= 18
+    txt(55, y, "NET PAYOUT", 13, True)
+    right(y, f"{fmt(net_minor, ccy)} {ccy}", 13, True); y -= 26
+    txt(50, y, "Automated payout confirmation from TransactWorld.", 9)
+    y -= 12
+    txt(50, y, f"Quote confirmation code {code} for any query about this settlement.", 9)
+    return _pdf("\n".join(ops))
+
+
+def _xls_bytes(ccy: str, items: list[dict]) -> bytes:
+    """Transaction list as a SpreadsheetML .xls (opens natively in Excel)."""
+    e = exponent(ccy)
+
+    def major(m) -> float:
+        return int(m) / (10 ** e)
+
+    def cell(v) -> str:
+        if isinstance(v, (int, float)):
+            return f'<Cell ss:StyleID="num"><Data ss:Type="Number">{v}</Data></Cell>'
+        return f'<Cell><Data ss:Type="String">{_html.escape(str(v))}</Data></Cell>'
+
+    header = ["Date", "Reference", "Brand", "Last 4", "Status", "Type",
+              f"Gross ({ccy})", f"MDR ({ccy})", f"Approved fee ({ccy})",
+              f"Declined fee ({ccy})", f"Refund fee ({ccy})", f"Chargeback fee ({ccy})",
+              f"Reserve ({ccy})", f"Net ({ccy})"]
+    rows = [header]
+    for it in items:
+        rows.append([
+            str(it["occurred_at"])[:10], it["reference"], it["brand"], it["last_four"],
+            it["status"], it["type"],
+            major(it["gross_minor"]), major(it["mdr_minor"]), major(it["approved_fee_minor"]),
+            major(it["declined_fee_minor"]), major(it["refund_fee_minor"]),
+            major(it["chargeback_fee_minor"]), major(it["reserve_minor"]), major(it["net_minor"]),
+        ])
+    body = "".join("<Row>" + "".join(cell(c) for c in r) + "</Row>" for r in rows)
+    xml = ('<?xml version="1.0"?>\n<?mso-application progid="Excel.Sheet"?>\n'
+           '<Workbook xmlns="urn:schemas-microsoft-com:office:spreadsheet" '
+           'xmlns:ss="urn:schemas-microsoft-com:office:spreadsheet">'
+           '<Styles><Style ss:ID="num"><NumberFormat ss:Format="#,##0.00"/></Style></Styles>'
+           f'<Worksheet ss:Name="Transactions"><Table>{body}</Table></Worksheet></Workbook>')
+    return xml.encode("utf-8")
+
+
 def build(conn: psycopg.Connection, settlement_id: int) -> dict | None:
     """Assemble the email (to, subject, html, attachments) or None if not found."""
     s = _fetch(conn, settlement_id)
@@ -118,6 +223,7 @@ def build(conn: psycopg.Connection, settlement_id: int) -> dict | None:
         return None
     ccy = s["currency"]
     bd = dict(s["breakdown"] or {})
+    counts = dict(bd.get("counts") or {})
     bd.pop("counts", None)
     bd.pop("items_count", None)
     items = line_items(conn, settlement_id)
@@ -150,11 +256,18 @@ def build(conn: psycopg.Connection, settlement_id: int) -> dict | None:
   {_items_html(ccy, items)}
   <p style="color:#94a3b8;font-size:12px;margin-top:20px">
     This is an automated payout confirmation from TransactWorld. Quote confirmation code
-    <b>{_html.escape(code)}</b> for any query about this settlement. The full transaction list is attached as a CSV.
+    <b>{_html.escape(code)}</b> for any query about this settlement. Attached: the settlement
+    <b>report (PDF)</b> and the full <b>transaction list (Excel)</b>.
   </p>
 </div>"""
-    csv_name = f"payout-{code}.csv".replace(" ", "_")
-    attachments = [(csv_name, "text/csv", _csv_bytes(ccy, items))]
+    window_full = f"{str(s['window_start'])[:10]} to {str(s['window_end'])[:10]}"
+    attachments = [
+        (f"settlement-report-{code}.pdf".replace(" ", "_"), "application/pdf",
+         _pdf_report(s["merchant_name"], ccy, code, window_full, counts, bd,
+                     int(s["net_payout_minor"]))),
+        (f"transactions-{code}.xls".replace(" ", "_"), "application/vnd.ms-excel",
+         _xls_bytes(ccy, items)),
+    ]
     return {"to": s["merchant_email"], "subject": subject, "html": html,
             "attachments": attachments, "merchant_email": s["merchant_email"],
             "state": s["state"]}

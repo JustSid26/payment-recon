@@ -220,7 +220,9 @@ ALTER TABLE settlements ADD COLUMN IF NOT EXISTS confirmation_code TEXT;
 UPDATE settlements
    SET confirmation_code = 'TW-' || upper(substr(replace(settlement_uuid::text,'-',''),1,10))
  WHERE confirmation_code IS NULL;
-CREATE INDEX IF NOT EXISTS ix_settlements_confcode ON settlements (confirmation_code);
+-- unique so a confirmation code is never shared by two settlements
+DROP INDEX IF EXISTS ix_settlements_confcode;
+CREATE UNIQUE INDEX IF NOT EXISTS ux_settlements_confcode ON settlements (confirmation_code);
 
 -- Speeds the cycle's per-event eligibility scan.
 CREATE INDEX IF NOT EXISTS ix_events_settle_after
