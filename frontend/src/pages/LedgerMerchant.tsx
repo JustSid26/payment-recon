@@ -230,7 +230,7 @@ export default function LedgerMerchant() {
   return (
     <div className="stack">
       <div data-print="hide">
-        <Link to="/ledger" className="back-link">← Ledger</Link>
+        {isAdmin && <Link to="/ledger" className="back-link">← Ledger</Link>}
         <div className="page-head" style={{ marginBottom: 0 }}>
           <div style={{ minWidth: 0 }}>
             {editing ? (

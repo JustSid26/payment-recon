@@ -35,6 +35,16 @@ function MerchantOnly({ children }: { children: React.ReactElement }) {
   return getUser()?.role === 'merchant' ? children : <Navigate to="/" replace />
 }
 
+/** A merchant IS a fixed merchant — skip the "pick a merchant" ledger list and
+ *  land them straight on their own ledger. Admins get the full list. */
+function LedgerRoute() {
+  const user = getUser()
+  if (user?.role === 'merchant' && user.merchant_uuid) {
+    return <Navigate to={`/ledger/merchants/${user.merchant_uuid}`} replace />
+  }
+  return <Ledger />
+}
+
 export default function App() {
   return (
     <>
@@ -92,7 +102,7 @@ export default function App() {
               </AdminOnly>
             }
           />
-          <Route path="/ledger" element={<Ledger />} />
+          <Route path="/ledger" element={<LedgerRoute />} />
           <Route path="/ledger/merchants/:uuid" element={<LedgerMerchant />} />
           <Route path="/ledger/accounts/:id" element={<LedgerAccountPage />} />
           <Route
