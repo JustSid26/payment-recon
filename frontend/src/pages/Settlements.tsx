@@ -17,6 +17,7 @@ export default function Settlements() {
   const [view, setView] = useState<'list' | 'daily'>('list')
   const [merchantUuid, setMerchantUuid] = useState('')
   const [currency, setCurrency] = useState('')
+  const [code, setCode] = useState('')
 
   const merchants = useApi(
     () => (isAdmin ? api<{ items: Merchant[] }>('/api/merchants') : Promise.resolve(null)),
@@ -26,9 +27,9 @@ export default function Settlements() {
   const { data, loading } = useApi(
     () =>
       api<{ items: Settlement[] }>('/api/settlements', {
-        params: { merchant_uuid: isAdmin ? merchantUuid : undefined, currency },
+        params: { merchant_uuid: isAdmin ? merchantUuid : undefined, currency, code: code.trim() || undefined },
       }),
-    [merchantUuid, currency, isAdmin],
+    [merchantUuid, currency, code, isAdmin],
   )
 
   const cols: Column<Settlement>[] = [
@@ -41,6 +42,11 @@ export default function Settlements() {
           },
         ] as Column<Settlement>[])
       : []),
+    {
+      key: 'code',
+      header: 'Confirmation code',
+      render: (s) => <span className="mono small">{s.confirmation_code ?? '—'}</span>,
+    },
     { key: 'ccy', header: 'Currency', render: (s) => <span className="ccy-tag">{s.currency}</span> },
     {
       key: 'window',
@@ -134,6 +140,13 @@ export default function Settlements() {
               <option key={c} value={c}>{c}</option>
             ))}
           </select>
+          <input
+            className="input"
+            style={{ maxWidth: 240 }}
+            placeholder="Search confirmation code…"
+            value={code}
+            onChange={(e) => setCode(e.target.value)}
+          />
         </div>
         <DataTable
           columns={cols}

@@ -43,8 +43,8 @@ def _fetch(conn: psycopg.Connection, settlement_id: int) -> dict | None:
     cur = conn.cursor()
     cur.execute(
         """SELECT s.id, s.settlement_uuid, s.currency, s.window_start, s.window_end,
-                  s.state, s.net_payout_minor, s.payout_reference, s.breakdown,
-                  m.name AS merchant_name, m.email AS merchant_email
+                  s.state, s.net_payout_minor, s.payout_reference, s.confirmation_code,
+                  s.breakdown, m.name AS merchant_name, m.email AS merchant_email
              FROM settlements s JOIN merchants m ON m.id = s.merchant_id
             WHERE s.id = %s""",
         (settlement_id,),
@@ -122,10 +122,11 @@ def build(conn: psycopg.Connection, settlement_id: int) -> dict | None:
     bd.pop("items_count", None)
     items = line_items(conn, settlement_id)
     net = fmt(int(s["net_payout_minor"]), ccy)
+    code = s["confirmation_code"] or ("TW-" + str(s["settlement_uuid"]).replace("-", "")[:10].upper())
     ref = s["payout_reference"] or str(s["settlement_uuid"])[:8]
     window = f"{str(s['window_start'])[:10]} → {str(s['window_end'])[:10]}"
     merchant = _html.escape(s["merchant_name"])
-    subject = f"Payout confirmation — {net} {ccy} to {s['merchant_name']}"
+    subject = f"Payout confirmation {code} — {net} {ccy} to {s['merchant_name']}"
     html = f"""\
 <div style="font-family:-apple-system,Segoe UI,Roboto,sans-serif;color:#0f172a;max-width:680px;margin:0 auto">
   <h2 style="margin:0 0 4px">Payout confirmation</h2>
@@ -133,7 +134,11 @@ def build(conn: psycopg.Connection, settlement_id: int) -> dict | None:
   <div style="background:#0f172a;color:#fff;border-radius:12px;padding:18px 20px;margin-bottom:20px">
     <div style="font-size:13px;opacity:.8">Net payout</div>
     <div style="font-size:28px;font-weight:700">{net} {ccy}</div>
-    <div style="font-size:12px;opacity:.75;margin-top:6px">Ref {_html.escape(str(ref))} · Processing window {window} · {len(items)} transaction(s)</div>
+    <div style="font-size:12px;opacity:.75;margin-top:6px">Processing window {window} · {len(items)} transaction(s)</div>
+    <div style="margin-top:12px;padding-top:12px;border-top:1px solid rgba(255,255,255,.15)">
+      <span style="font-size:12px;opacity:.8">Settlement confirmation code</span><br>
+      <span style="font-size:18px;font-weight:700;letter-spacing:.05em">{_html.escape(code)}</span>
+    </div>
   </div>
   <h3 style="margin:0 0 8px;font-size:15px">Payout report</h3>
   <table style="border-collapse:collapse;width:100%;font-size:13px;border:1px solid #e5e7eb;border-radius:8px;overflow:hidden">
@@ -144,10 +149,11 @@ def build(conn: psycopg.Connection, settlement_id: int) -> dict | None:
   <h3 style="margin:20px 0 8px;font-size:15px">Transactions in this payout</h3>
   {_items_html(ccy, items)}
   <p style="color:#94a3b8;font-size:12px;margin-top:20px">
-    This is an automated payout confirmation from TransactWorld. The full transaction list is attached as a CSV.
+    This is an automated payout confirmation from TransactWorld. Quote confirmation code
+    <b>{_html.escape(code)}</b> for any query about this settlement. The full transaction list is attached as a CSV.
   </p>
 </div>"""
-    csv_name = f"payout-{ref}.csv".replace(" ", "_")
+    csv_name = f"payout-{code}.csv".replace(" ", "_")
     attachments = [(csv_name, "text/csv", _csv_bytes(ccy, items))]
     return {"to": s["merchant_email"], "subject": subject, "html": html,
             "attachments": attachments, "merchant_email": s["merchant_email"],

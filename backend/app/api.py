@@ -797,7 +797,7 @@ def _event_payload(cur, e) -> dict:
 # ---------------------------------------------------------------- settlements
 @app.get("/api/settlements")
 def settlements(user: dict = Depends(current_user), merchant_uuid: str | None = None,
-                currency: str | None = None):
+                currency: str | None = None, code: str | None = None):
     with get_pool().connection() as conn:
         cur = conn.cursor()
         mid = scope_merchant_id(user, merchant_uuid, cur)
@@ -806,6 +806,10 @@ def settlements(user: dict = Depends(current_user), merchant_uuid: str | None = 
             where.append("s.merchant_id=%(mid)s"); p["mid"] = mid
         if currency:
             where.append("s.currency=%(c)s"); p["c"] = currency.upper()
+        if code and code.strip():
+            # merchant quotes a confirmation code — match it (or a uuid fragment)
+            where.append("(s.confirmation_code ILIKE %(code)s OR s.settlement_uuid::text ILIKE %(code)s)")
+            p["code"] = f"%{code.strip()}%"
         cur.execute(f"""
             SELECT s.*, m.name AS merchant_name, m.merchant_uuid AS m_uuid
               FROM settlements s JOIN merchants m ON m.id=s.merchant_id
@@ -816,6 +820,7 @@ def settlements(user: dict = Depends(current_user), merchant_uuid: str | None = 
             counts = bd.get("counts", {})
             items.append({
                 "settlement_uuid": str(s["settlement_uuid"]),
+                "confirmation_code": s.get("confirmation_code"),
                 "merchant_uuid": str(s["m_uuid"]), "merchant_name": s["merchant_name"],
                 "currency": s["currency"], "window_start": s["window_start"].isoformat(),
                 "window_end": s["window_end"].isoformat(), "state": s["state"],
@@ -1152,6 +1157,7 @@ def settlement_detail(suuid: str, user: dict = Depends(current_user)):
         usdc_amount = f"{float(rate) * s['net_payout_minor'] / 100:.2f}" \
             if s["currency"] != "JPY" else f"{float(rate) * s['net_payout_minor']:.2f}"
         return {"settlement_uuid": str(s["settlement_uuid"]),
+                "confirmation_code": s.get("confirmation_code"),
                 "merchant_uuid": str(s["m_uuid"]), "merchant_name": s["merchant_name"],
                 "currency": s["currency"], "window_start": s["window_start"].isoformat(),
                 "window_end": s["window_end"].isoformat(), "state": s["state"],

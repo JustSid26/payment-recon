@@ -473,6 +473,9 @@ export default function SettlementDetailPage() {
             </h1>
             <div className="sub">
               {s.merchant_name} · <span className="ccy-tag">{ccy}</span> · {fmtInt(s.items_count)} items
+              {s.confirmation_code && (
+                <> · Code <b className="mono">{s.confirmation_code}</b></>
+              )}
             </div>
           </div>
           {isAdmin && (s.state === 'generated' || s.state === 'completed') && (

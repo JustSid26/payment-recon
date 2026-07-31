@@ -187,6 +187,7 @@ export interface TransactionDetail extends Transaction {
 // ---- Settlements ----
 export interface Settlement {
   settlement_uuid: string
+  confirmation_code?: string | null
   merchant_uuid: string
   merchant_name: string
   currency: string
@@ -266,6 +267,7 @@ export interface DailySettlementResp {
 
 export interface SettlementDetail {
   settlement_uuid: string
+  confirmation_code?: string | null
   merchant_uuid?: string
   merchant_name: string
   currency: string
