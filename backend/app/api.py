@@ -904,6 +904,15 @@ def _email_settlement_bg(settlement_id: int) -> None:
         pass
 
 
+def _email_settlement_day_bg(settlement_id: int, day: str) -> None:
+    """Send a per-day payout-confirmation email (background task)."""
+    try:
+        with get_pool().connection() as conn:
+            settlement_email_mod.send_day_confirmation(conn, settlement_id, day)
+    except Exception:  # pragma: no cover
+        pass
+
+
 @app.post("/api/settlements/{suuid}/complete")
 def complete_settlement(suuid: str, background: BackgroundTasks,
                         user: dict = Depends(require_admin)):
@@ -936,7 +945,8 @@ def settlement_day_payouts(suuid: str, user: dict = Depends(current_user)):
 
 
 @app.post("/api/settlements/{suuid}/days/{day}/complete")
-def complete_settlement_day(suuid: str, day: str, user: dict = Depends(require_admin)):
+def complete_settlement_day(suuid: str, day: str, background: BackgroundTasks,
+                            user: dict = Depends(require_admin)):
     """Pay out one processing day of a settlement (partial completion)."""
     with get_pool().connection() as conn:
         cur = conn.cursor()
@@ -949,6 +959,10 @@ def complete_settlement_day(suuid: str, day: str, user: dict = Depends(require_a
         except settle_mod.SettlementError as e:
             err(409, e.code, e.message)
         conn.commit()
+        # email the per-day payout report (dormant if mailer/merchant email unset);
+        # only on a fresh pay, not an idempotent replay
+        if not res.get("already_paid"):
+            background.add_task(_email_settlement_day_bg, s["id"], day)
         return res
 
 

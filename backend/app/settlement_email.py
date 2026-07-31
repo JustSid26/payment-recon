@@ -19,7 +19,7 @@ import psycopg
 
 from . import mailer
 from .money import fmt, exponent
-from .settle import line_items
+from .settle import line_items, day_payouts
 
 # breakdown label → key, in report order. Rows that are zero are hidden.
 _REPORT_ROWS = [
@@ -372,6 +372,107 @@ def send_confirmation(conn: psycopg.Connection, settlement_id: int) -> dict:
     email = build(conn, settlement_id)
     if email is None:
         return {"sent": False, "reason": "settlement not found"}
+    if not email["merchant_email"]:
+        return {"sent": False, "reason": "merchant has no email on file"}
+    return mailer.send(email["to"], email["subject"], email["html"], email["attachments"])
+
+
+# ---- per-day payout email (fired when a single processing day is confirmed) ----
+def _day_breakdown(items: list[dict]) -> dict:
+    """Aggregate one day's line items into the settlement-statement breakdown shape."""
+    b = dict(gross_captured_minor=0, mdr_minor=0, approved_txn_fees_minor=0,
+             declined_txn_fees_minor=0, refunds_minor=0, refund_fees_minor=0,
+             chargebacks_minor=0, chargeback_fees_minor=0, reserve_held_minor=0,
+             reserve_released_minor=0, adjustments_minor=0)
+    for it in items:
+        g = int(it["gross_minor"]); t = str(it.get("type") or "")
+        if g > 0:
+            b["gross_captured_minor"] += g
+        elif t.startswith("chargeback"):
+            b["chargebacks_minor"] += -g
+        elif g < 0:
+            b["refunds_minor"] += -g
+        b["mdr_minor"] += int(it["mdr_minor"])
+        b["approved_txn_fees_minor"] += int(it["approved_fee_minor"])
+        b["declined_txn_fees_minor"] += int(it["declined_fee_minor"])
+        b["refund_fees_minor"] += int(it["refund_fee_minor"])
+        b["chargeback_fees_minor"] += int(it["chargeback_fee_minor"])
+        r = int(it["reserve_minor"])
+        if r > 0:
+            b["reserve_held_minor"] += r
+        elif r < 0:
+            b["reserve_released_minor"] += -r
+    return b
+
+
+def build_day(conn: psycopg.Connection, settlement_id: int, day: str) -> dict | None:
+    """Assemble the per-day payout email (that day's report PDF + that day's Excel)."""
+    s = _fetch(conn, settlement_id)
+    if s is None:
+        return None
+    ccy = s["currency"]
+    code = s["confirmation_code"] or ("TW-" + str(s["settlement_uuid"]).replace("-", "")[:10].upper())
+    items = [it for it in line_items(conn, settlement_id) if str(it["occurred_at"])[:10] == day]
+    row = next((d for d in day_payouts(conn, settlement_id)["days"] if d["day"] == day), None)
+    if row is None:
+        return None
+    net = int(row["payout_minor"])
+    bd = _day_breakdown(items)
+    bd["subtotal_minor"] = int(row["subtotal_minor"])
+    bd["settlement_fee_minor"] = int(row["fee_minor"])
+    counts = {
+        "paid": sum(1 for it in items if it.get("type") == "payment_captured" or int(it["gross_minor"]) > 0),
+        "declined": sum(1 for it in items if it.get("type") == "decline_fee" or it.get("status") == "auth_failed"),
+        "refunds": sum(1 for it in items if it.get("type") == "refund"),
+        "chargebacks": sum(1 for it in items if str(it.get("type") or "").startswith("chargeback")),
+    }
+    fs = {k: s.get(k) for k in ("mdr_bps", "approved_txn_fee_minor", "declined_txn_fee_minor",
+                                "refund_fee_minor", "chargeback_fee_minor", "reserve_hold_bps",
+                                "settlement_fee_bps")}
+    net_str = fmt(net, ccy)
+    merchant = _html.escape(s["merchant_name"])
+    subject = f"Payout confirmation {code} — {day} — {net_str} {ccy} to {s['merchant_name']}"
+    html = f"""\
+<div style="font-family:-apple-system,Segoe UI,Roboto,sans-serif;color:#0f172a;max-width:680px;margin:0 auto">
+  <h2 style="margin:0 0 4px">Payout confirmation — {day}</h2>
+  <p style="color:#475569;margin:0 0 16px">A single-day payout has been made to <b>{merchant}</b>.</p>
+  <div style="background:#0f172a;color:#fff;border-radius:12px;padding:18px 20px;margin-bottom:20px">
+    <div style="font-size:13px;opacity:.8">Day net payout</div>
+    <div style="font-size:28px;font-weight:700">{net_str} {ccy}</div>
+    <div style="font-size:12px;opacity:.75;margin-top:6px">Processing day {day} · {len(items)} transaction(s)</div>
+    <div style="margin-top:12px;padding-top:12px;border-top:1px solid rgba(255,255,255,.15)">
+      <span style="font-size:12px;opacity:.8">Settlement confirmation code</span><br>
+      <span style="font-size:18px;font-weight:700;letter-spacing:.05em">{_html.escape(code)}</span>
+    </div>
+  </div>
+  <h3 style="margin:0 0 8px;font-size:15px">Day payout report</h3>
+  <table style="border-collapse:collapse;width:100%;font-size:13px;border:1px solid #e5e7eb;border-radius:8px;overflow:hidden">
+    {_report_html(ccy, bd, net)}
+    <tr><td style="padding:8px 12px;font-weight:700;background:#f0fdf4">Day net payout</td>
+        <td style="padding:8px 12px;text-align:right;font-weight:700;background:#f0fdf4">{net_str} {ccy}</td></tr>
+  </table>
+  <p style="color:#94a3b8;font-size:12px;margin-top:20px">
+    Automated payout confirmation from TransactWorld for <b>{day}</b>. Quote confirmation code
+    <b>{_html.escape(code)}</b> for any query. Attached: the day <b>report (PDF)</b> and its
+    <b>{len(items)} transactions (Excel)</b>.
+  </p>
+</div>"""
+    attachments = [
+        (f"settlement-report-{code}-{day}.pdf".replace(" ", "_"), "application/pdf",
+         _pdf_report(s["merchant_name"], ccy, code, day, counts, bd, net, fs, _usdc(ccy, net), len(items))),
+        (f"transactions-{code}-{day}.xlsx".replace(" ", "_"),
+         "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+         _xlsx_bytes(_txn_rows(ccy, items))),
+    ]
+    return {"to": s["merchant_email"], "subject": subject, "html": html,
+            "attachments": attachments, "merchant_email": s["merchant_email"]}
+
+
+def send_day_confirmation(conn: psycopg.Connection, settlement_id: int, day: str) -> dict:
+    """Build + send the per-day payout confirmation. Never raises."""
+    email = build_day(conn, settlement_id, day)
+    if email is None:
+        return {"sent": False, "reason": "settlement/day not found"}
     if not email["merchant_email"]:
         return {"sent": False, "reason": "merchant has no email on file"}
     return mailer.send(email["to"], email["subject"], email["html"], email["attachments"])
