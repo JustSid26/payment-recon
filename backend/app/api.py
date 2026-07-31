@@ -807,9 +807,12 @@ def settlements(user: dict = Depends(current_user), merchant_uuid: str | None = 
         if currency:
             where.append("s.currency=%(c)s"); p["c"] = currency.upper()
         if code and code.strip():
-            # merchant quotes a confirmation code — match it (or a uuid fragment)
-            where.append("(s.confirmation_code ILIKE %(code)s OR s.settlement_uuid::text ILIKE %(code)s)")
+            # merchant quotes a confirmation code — match the settlement code, a uuid
+            # fragment, or a per-day code (settlement code is a prefix of the day code)
+            where.append("(s.confirmation_code ILIKE %(code)s OR s.settlement_uuid::text ILIKE %(code)s "
+                         "OR %(raw)s ILIKE s.confirmation_code || '%%')")
             p["code"] = f"%{code.strip()}%"
+            p["raw"] = code.strip()
         cur.execute(f"""
             SELECT s.*, m.name AS merchant_name, m.merchant_uuid AS m_uuid
               FROM settlements s JOIN merchants m ON m.id=s.merchant_id
@@ -995,6 +998,18 @@ def send_settlement_confirmation(suuid: str, user: dict = Depends(require_admin)
         if s is None:
             err(404, "not_found", "settlement not found")
         return settlement_email_mod.send_confirmation(conn, s["id"])
+
+
+@app.post("/api/settlements/{suuid}/days/{day}/send-confirmation")
+def send_settlement_day_confirmation(suuid: str, day: str, user: dict = Depends(require_admin)):
+    """Manually (re)send the per-day payout report — day-only, returns send result."""
+    with get_pool().connection() as conn:
+        cur = conn.cursor()
+        cur.execute("SELECT id FROM settlements WHERE settlement_uuid=%s", (suuid,))
+        s = cur.fetchone()
+        if s is None:
+            err(404, "not_found", "settlement not found")
+        return settlement_email_mod.send_day_confirmation(conn, s["id"], day)
 
 
 @app.get("/api/email/status")

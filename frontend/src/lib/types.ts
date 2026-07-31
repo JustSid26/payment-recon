@@ -292,6 +292,7 @@ export interface DayPayout {
   fee_minor: number
   payout_minor: number
   paid: boolean
+  confirmation_code: string
   payout_reference: string | null
   paid_at: string | null
 }

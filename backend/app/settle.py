@@ -520,12 +520,13 @@ def day_payouts(conn: psycopg.Connection, settlement_id: int) -> dict:
     The day payouts sum exactly to the settlement's net_payout_minor.
     """
     cur = conn.cursor()
-    cur.execute("SELECT merchant_id, currency, breakdown, net_payout_minor, state "
-                "FROM settlements WHERE id=%s", (settlement_id,))
+    cur.execute("SELECT merchant_id, currency, breakdown, net_payout_minor, state, "
+                "confirmation_code FROM settlements WHERE id=%s", (settlement_id,))
     s = cur.fetchone()
     if s is None:
         raise SettlementError("not_found", "settlement not found")
     fee = int((s["breakdown"] or {}).get("settlement_fee_minor", 0))
+    base_code = s["confirmation_code"] or "TW"
     cur.execute(
         """SELECT e.occurred_at::date AS day, SUM(si.payable_delta_minor) AS subtotal
              FROM settlement_items si JOIN ledger_events e ON e.id = si.event_id
@@ -552,6 +553,9 @@ def day_payouts(conn: psycopg.Connection, settlement_id: int) -> dict:
         days.append({
             "day": iso, "subtotal_minor": r["subtotal"], "fee_minor": a,
             "payout_minor": r["subtotal"] - a, "paid": p is not None,
+            # per-day confirmation code: settlement code + the processing date, so it
+            # is unique per day and traceable back to the settlement.
+            "confirmation_code": f"{base_code}-{iso.replace('-', '')}",
             "payout_reference": p["payout_reference"] if p else None,
             "paid_at": p["paid_at"].isoformat() if p else None,
         })

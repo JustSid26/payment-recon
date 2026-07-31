@@ -305,6 +305,21 @@ export default function SettlementDetailPage() {
     }
   }
 
+  const [sendingDay, setSendingDay] = useState(false)
+  const sendDayReport = async (day: string) => {
+    setSendingDay(true)
+    try {
+      const res = await api<{ sent: boolean; reason?: string; to?: string }>(
+        `/api/settlements/${uuid}/days/${day}/send-confirmation`, { method: 'POST' })
+      if (res.sent) toastSuccess(`Day report for ${fmtDate(day)} sent${res.to ? ` to ${res.to}` : ''}`)
+      else toastError(`Not sent — ${res.reason ?? 'unknown reason'}`)
+    } catch (e) {
+      toastError(e instanceof ApiError ? e.message : 'Failed to send day report')
+    } finally {
+      setSendingDay(false)
+    }
+  }
+
   const [emailing, setEmailing] = useState(false)
   const sendConfirmation = async () => {
     setEmailing(true)
@@ -478,9 +493,13 @@ export default function SettlementDetailPage() {
               )}
             </div>
           </div>
-          {isAdmin && (s.state === 'generated' || s.state === 'completed') && (
+          {isAdmin && (
             <div className="head-actions">
-              {s.state === 'generated' ? (
+              <button className="btn" onClick={() => void sendConfirmation()} disabled={emailing}
+                      title="Email the whole-settlement report (PDF + Excel) to the merchant">
+                {emailing ? 'Sending…' : '✉ Send report'}
+              </button>
+              {s.state === 'generated' && (
                 <>
                   <button className="btn" onClick={() => setShowCancel(true)} disabled={completing || cancelling}>
                     Cancel settlement
@@ -489,16 +508,9 @@ export default function SettlementDetailPage() {
                     {completing ? 'Posting payout…' : '✓ Confirm payout'}
                   </button>
                 </>
-              ) : (
-                <>
-                  <button className="btn success" disabled>
-                    ✓ Completed
-                  </button>
-                  <button className="btn" onClick={() => void sendConfirmation()} disabled={emailing}
-                          title="Email the payout confirmation (report + transaction list) to the merchant">
-                    {emailing ? 'Sending…' : '✉ Email confirmation'}
-                  </button>
-                </>
+              )}
+              {s.state === 'completed' && (
+                <button className="btn success" disabled>✓ Completed</button>
               )}
             </div>
           )}
@@ -543,6 +555,9 @@ export default function SettlementDetailPage() {
           dayPay={dayPay.data}
           confirming={confirmingDay}
           onConfirmDay={(day) => setConfirmDayValue(day)}
+          isAdmin={isAdmin}
+          sendingDay={sendingDay}
+          onSendDay={sendDayReport}
         />
       ) : (
         <LinesView items={items} loading={lines.loading} ccy={ccy} />
@@ -642,7 +657,7 @@ export default function SettlementDetailPage() {
   )
 }
 
-function DailyView({ days, loading, s, items, baseName, canConfirm, onConfirm, dayPay, confirming, onConfirmDay }: {
+function DailyView({ days, loading, s, items, baseName, canConfirm, onConfirm, dayPay, confirming, onConfirmDay, isAdmin, sendingDay, onSendDay }: {
   days: SettlementDayRow[]
   loading: boolean
   s: SettlementDetail
@@ -653,6 +668,9 @@ function DailyView({ days, loading, s, items, baseName, canConfirm, onConfirm, d
   dayPay: DayPayouts | null
   confirming: boolean
   onConfirmDay: (day: string) => void
+  isAdmin: boolean
+  sendingDay: boolean
+  onSendDay: (day: string) => void
 }) {
   const ccy = s.currency
   const fs = s.fee_schedule
@@ -770,6 +788,10 @@ function DailyView({ days, loading, s, items, baseName, canConfirm, onConfirm, d
           canConfirmDay={canConfirm && perDayAvailable && !(paidByDay.get(selected.date)?.paid ?? false)}
           confirming={confirming}
           onConfirmDay={() => onConfirmDay(selected.date)}
+          dayCode={paidByDay.get(selected.date)?.confirmation_code}
+          canSend={isAdmin}
+          sending={sendingDay}
+          onSendReport={() => onSendDay(selected.date)}
         />
       </div>
     </div>
@@ -789,6 +811,10 @@ function DailyStatement({
   canConfirmDay,
   confirming,
   onConfirmDay,
+  dayCode,
+  canSend,
+  sending,
+  onSendReport,
 }: {
   day: SettlementDayRow
   dayItems: SettlementLineItem[]
@@ -802,6 +828,10 @@ function DailyStatement({
   canConfirmDay: boolean
   confirming: boolean
   onConfirmDay: () => void
+  dayCode?: string
+  canSend: boolean
+  sending: boolean
+  onSendReport: () => void
 }) {
   const settlementFeeDetail = basisLabel(percentBasis(feeSchedule?.settlement_fee_bps))
   const txnBase = `${baseName}-${day.date}-transactions`
@@ -820,12 +850,23 @@ function DailyStatement({
           <div className="win num">
             Parent window {fmtDate(windowStart)} → {fmtDate(windowEnd)}
           </div>
+          {dayCode && (
+            <div className="win num">Day code <b className="mono">{dayCode}</b></div>
+          )}
           <div className="export-group" data-print="hide" style={{ marginTop: 10 }}>
             <span className="export-label">This day’s transactions</span>
             <button className="export-btn" onClick={exportDayCSV} disabled={!dayItems.length}>CSV</button>
             <button className="export-btn" onClick={exportDayExcel} disabled={!dayItems.length}>Excel</button>
             <span className="dim small">{fmtInt(dayItems.length)} txns</span>
           </div>
+          {canSend && (
+            <div data-print="hide" style={{ marginTop: 10 }}>
+              <button className="btn sm" onClick={onSendReport} disabled={sending || !dayItems.length}
+                      title="Email this day’s report (PDF + Excel) to the merchant">
+                {sending ? 'Sending…' : '✉ Send day report'}
+              </button>
+            </div>
+          )}
         </div>
         <div className="daily-approve-box">
           <div className="kicker">Counts</div>

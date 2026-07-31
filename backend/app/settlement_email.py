@@ -411,7 +411,8 @@ def build_day(conn: psycopg.Connection, settlement_id: int, day: str) -> dict | 
     if s is None:
         return None
     ccy = s["currency"]
-    code = s["confirmation_code"] or ("TW-" + str(s["settlement_uuid"]).replace("-", "")[:10].upper())
+    base = s["confirmation_code"] or ("TW-" + str(s["settlement_uuid"]).replace("-", "")[:10].upper())
+    code = f"{base}-{day.replace('-', '')}"   # per-day confirmation code
     items = [it for it in line_items(conn, settlement_id) if str(it["occurred_at"])[:10] == day]
     row = next((d for d in day_payouts(conn, settlement_id)["days"] if d["day"] == day), None)
     if row is None:
@@ -458,9 +459,9 @@ def build_day(conn: psycopg.Connection, settlement_id: int, day: str) -> dict | 
   </p>
 </div>"""
     attachments = [
-        (f"settlement-report-{code}-{day}.pdf".replace(" ", "_"), "application/pdf",
+        (f"settlement-report-{code}.pdf".replace(" ", "_"), "application/pdf",
          _pdf_report(s["merchant_name"], ccy, code, day, counts, bd, net, fs, _usdc(ccy, net), len(items))),
-        (f"transactions-{code}-{day}.xlsx".replace(" ", "_"),
+        (f"transactions-{code}.xlsx".replace(" ", "_"),
          "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
          _xlsx_bytes(_txn_rows(ccy, items))),
     ]
