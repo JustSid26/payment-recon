@@ -324,6 +324,39 @@ body.presentation .internal-only { display: none !important; }
 .stat-card .meta { font-size: 12px; color: var(--ink-3); margin-top: 6px; display: flex; gap: 12px; flex-wrap: wrap; }
 .stat-card .meta b { color: var(--ink-2); font-weight: 600; font-variant-numeric: tabular-nums; }
 
+/* ---- Merchant money hero (money-first summary) ---- */
+.money-hero {
+  display: grid;
+  gap: 16px;
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+}
+.money-card {
+  padding: 18px 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  border-top: 3px solid var(--brand);
+}
+.mh-top { display: flex; align-items: center; justify-content: space-between; }
+.mh-link { font-size: 12px; font-weight: 600; }
+.mh-primary { display: flex; flex-direction: column; gap: 2px; }
+.mh-label {
+  font-size: 11px; font-weight: 700; letter-spacing: 0.06em;
+  text-transform: uppercase; color: var(--ink-3);
+}
+.mh-value { font-size: 28px; font-weight: 700; letter-spacing: -0.02em; font-variant-numeric: tabular-nums; }
+.mh-value .money.neg { color: var(--red); }
+.mh-split {
+  display: grid; grid-template-columns: 1fr 1fr; gap: 12px;
+  padding-top: 12px; border-top: 1px solid var(--border);
+}
+.mh-metric { display: flex; flex-direction: column; gap: 5px; align-items: flex-start; }
+.mh-metric b { font-size: 15px; font-variant-numeric: tabular-nums; }
+.mh-sub {
+  font-size: 11px; font-weight: 700; letter-spacing: 0.06em;
+  text-transform: uppercase; color: var(--ink-3);
+}
+
 .ccy-tag {
   font-size: 10.5px; font-weight: 700; letter-spacing: 0.05em;
   background: var(--gray-bg); border: 1px solid var(--gray-border);
@@ -703,6 +736,11 @@ table.data tbody tr.click:hover { background: #f8faff; }
 .filter-bar {
   display: flex; gap: 10px; flex-wrap: wrap; align-items: center;
   padding: 12px 14px;
+  position: sticky; top: 55px; z-index: 5;
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+  border-top-left-radius: var(--radius);
+  border-top-right-radius: var(--radius);
 }
 
 /* ============ Login ============ */

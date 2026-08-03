@@ -65,9 +65,6 @@ export default function Dashboard() {
   ]
 
   const needSetup = data?.quarantine?.unconfigured_merchants ?? 0
-  const merchantBalances = (accounts.data?.items ?? []).filter(
-    (a) => a.account_type === 'merchant_payable' || a.account_type === 'merchant_reserve',
-  )
 
   return (
     <div className="stack">
@@ -90,6 +87,15 @@ export default function Dashboard() {
             {' '}· <b>{fmtInt(data?.quarantine?.quarantined_transactions ?? 0)}</b> transactions on hold</span>
           <span className="go">Set up →</span>
         </Link>
+      )}
+
+      {/* Merchant: money first — what you have, what's coming, what's held */}
+      {isMerchant && (
+        <MerchantMoneyHero
+          accounts={accounts.data?.items ?? []}
+          settlements={settlements.data?.items ?? []}
+          loading={accounts.loading || settlements.loading}
+        />
       )}
 
       {/* KPI tiles */}
@@ -143,17 +149,6 @@ export default function Dashboard() {
           </div>
         )}
 
-        {/* merchant: available + reserve balances */}
-        {isMerchant && merchantBalances.map((a) => (
-          <div className="card stat-card" key={String(a.account_id)}>
-            <div className="label">
-              <span className="ccy-tag">{a.currency}</span>
-              {a.account_type === 'merchant_payable' ? 'Available' : 'Reserve held'}
-            </div>
-            <div className="value"><MoneyCell minor={a.balance_minor} currency={a.currency} /></div>
-            <div className="meta"><Link to={`/ledger/accounts/${a.account_id}`} className="small">Statement →</Link></div>
-          </div>
-        ))}
       </div>
 
       {/* Money by currency — cards or list, user's choice */}
@@ -226,6 +221,72 @@ export default function Dashboard() {
           />
         </div>
       )}
+    </div>
+  )
+}
+
+/** Money-first merchant summary: Available now, In settlement (coming), Reserve held. */
+function MerchantMoneyHero({
+  accounts,
+  settlements,
+  loading,
+}: {
+  accounts: LedgerAccount[]
+  settlements: Settlement[]
+  loading: boolean
+}) {
+  const rows = useMemo(() => {
+    const m = new Map<string, { available: number; reserve: number; pending: number; payableId?: number | string; reserveId?: number | string }>()
+    const get = (c: string) => {
+      const cur = m.get(c) ?? { available: 0, reserve: 0, pending: 0 }
+      m.set(c, cur)
+      return cur
+    }
+    for (const a of accounts) {
+      if (a.account_type === 'merchant_payable') { const r = get(a.currency); r.available += a.balance_minor; r.payableId = a.account_id }
+      else if (a.account_type === 'merchant_reserve') { const r = get(a.currency); r.reserve += a.balance_minor; r.reserveId = a.account_id }
+    }
+    for (const s of settlements) {
+      if (s.state !== 'completed') get(s.currency).pending += s.net_payout_minor
+    }
+    return [...m.entries()].sort(([a], [b]) => a.localeCompare(b))
+  }, [accounts, settlements])
+
+  if (loading && rows.length === 0) {
+    return (
+      <div className="grid grid-cards">
+        {[1, 2, 3].map((i) => <SkeletonCard key={i} />)}
+      </div>
+    )
+  }
+  if (rows.length === 0) return null
+
+  return (
+    <div className="money-hero">
+      {rows.map(([ccy, r]) => (
+        <div className="card money-card" key={ccy}>
+          <div className="mh-top">
+            <span className="ccy-tag">{ccy}</span>
+            {r.payableId != null && (
+              <Link to={`/ledger/accounts/${r.payableId}`} className="mh-link">Statement →</Link>
+            )}
+          </div>
+          <div className="mh-primary">
+            <span className="mh-label">Available to withdraw</span>
+            <span className="mh-value"><MoneyCell minor={r.available} currency={ccy} /></span>
+          </div>
+          <div className="mh-split">
+            <div className="mh-metric">
+              <span className="pay-pill in_settlement">In settlement</span>
+              <b><MoneyCell minor={r.pending} currency={ccy} dimZero /></b>
+            </div>
+            <div className="mh-metric">
+              <span className="mh-sub">Reserve held</span>
+              <b><MoneyCell minor={r.reserve} currency={ccy} dimZero /></b>
+            </div>
+          </div>
+        </div>
+      ))}
     </div>
   )
 }
