@@ -946,13 +946,17 @@ table.data tbody tr.click:hover { background: #f8faff; }
 }
 .daily-payout b { font-size: 16px; }
 
-.daily-report-toolbar {
+.daily-report-actions {
   display: flex;
-  align-items: center;
-  gap: 8px;
-  flex-wrap: wrap;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 6px;
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px solid var(--border);
+  width: 100%;
 }
-.daily-report-toolbar .export-group { margin: 0; }
+.daily-report-actions .export-group { justify-content: flex-end; flex-wrap: wrap; }
 
 @media (max-width: 1000px) {
   .daily-report-layout { grid-template-columns: 1fr; }

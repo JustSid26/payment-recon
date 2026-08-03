@@ -802,19 +802,6 @@ function DailyView({ days, loading, s, items, baseName, canConfirm, onConfirm, d
         </div>
       </div>
 
-      <div className="daily-report-toolbar" data-print="hide">
-        <span className="export-label">This day’s transactions · {fmtDate(selected.date)}</span>
-        <button className="export-btn" onClick={() => downloadCSV(`${baseName}-${selected.date}-transactions.csv`, lineItemRows(selectedItems, ccy))} disabled={!selectedItems.length}>CSV</button>
-        <button className="export-btn" onClick={() => downloadExcel(`${baseName}-${selected.date}-transactions.xls`, selected.date, lineItemRows(selectedItems, ccy))} disabled={!selectedItems.length}>Excel</button>
-        <span className="dim small">{fmtInt(selectedItems.length)} txns</span>
-        {isAdmin && (
-          <button className="btn sm" style={{ marginLeft: 'auto' }} onClick={() => onSendDay(selected.date)} disabled={sendingDay || !selectedItems.length}
-                  title="Email this day’s report (PDF + Excel) to the merchant">
-            {sendingDay ? 'Sending…' : '✉ Send day report'}
-          </button>
-        )}
-      </div>
-
       <div className="daily-report-layout">
         <div className="card daily-day-list" data-print="hide">
           <div className="card-title">
@@ -845,6 +832,8 @@ function DailyView({ days, loading, s, items, baseName, canConfirm, onConfirm, d
 
         <DailyStatement
           day={selected}
+          dayItems={selectedItems}
+          baseName={baseName}
           ccy={ccy}
           feeSchedule={fs}
           merchantName={s.merchant_name}
@@ -855,6 +844,9 @@ function DailyView({ days, loading, s, items, baseName, canConfirm, onConfirm, d
           confirming={confirming}
           onConfirmDay={() => onConfirmDay(selected.date)}
           dayCode={paidByDay.get(selected.date)?.confirmation_code}
+          canSend={isAdmin}
+          sending={sendingDay}
+          onSendReport={() => onSendDay(selected.date)}
         />
       </div>
     </div>
@@ -863,6 +855,8 @@ function DailyView({ days, loading, s, items, baseName, canConfirm, onConfirm, d
 
 function DailyStatement({
   day,
+  dayItems,
+  baseName,
   ccy,
   feeSchedule,
   merchantName,
@@ -873,8 +867,13 @@ function DailyStatement({
   confirming,
   onConfirmDay,
   dayCode,
+  canSend,
+  sending,
+  onSendReport,
 }: {
   day: SettlementDayRow
+  dayItems: SettlementLineItem[]
+  baseName: string
   ccy: string
   feeSchedule: SettlementDetail['fee_schedule']
   merchantName: string
@@ -885,8 +884,14 @@ function DailyStatement({
   confirming: boolean
   onConfirmDay: () => void
   dayCode?: string
+  canSend: boolean
+  sending: boolean
+  onSendReport: () => void
 }) {
   const settlementFeeDetail = basisLabel(percentBasis(feeSchedule?.settlement_fee_bps))
+  const txnBase = `${baseName}-${day.date}-transactions`
+  const exportDayCSV = () => downloadCSV(`${txnBase}.csv`, lineItemRows(dayItems, ccy))
+  const exportDayExcel = () => downloadExcel(`${txnBase}.xls`, day.date, lineItemRows(dayItems, ccy))
 
   return (
     <div className="card statement daily-statement">
@@ -929,6 +934,20 @@ function DailyStatement({
             {canConfirmDay && (
               <button className="btn primary sm" style={{ marginTop: 10 }} disabled={confirming} onClick={onConfirmDay}>
                 ✓ Confirm this day only
+              </button>
+            )}
+          </div>
+          <div className="daily-report-actions" data-print="hide">
+            <div className="export-group">
+              <span className="export-label">This day’s transactions</span>
+              <button className="export-btn" onClick={exportDayCSV} disabled={!dayItems.length}>CSV</button>
+              <button className="export-btn" onClick={exportDayExcel} disabled={!dayItems.length}>Excel</button>
+              <span className="dim small">{fmtInt(dayItems.length)} txns</span>
+            </div>
+            {canSend && (
+              <button className="btn sm" style={{ marginTop: 8 }} onClick={onSendReport} disabled={sending || !dayItems.length}
+                      title="Email this day’s report (PDF + Excel) to the merchant">
+                {sending ? 'Sending…' : '✉ Send day report'}
               </button>
             )}
           </div>
