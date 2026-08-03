@@ -938,14 +938,20 @@ function DailyStatement({
             )}
           </div>
           <div className="daily-report-actions" data-print="hide">
-            <div className="export-group">
-              <span className="export-label">This day’s transactions</span>
-              <button className="export-btn" onClick={exportDayCSV} disabled={!dayItems.length}>CSV</button>
-              <button className="export-btn" onClick={exportDayExcel} disabled={!dayItems.length}>Excel</button>
-              <span className="dim small">{fmtInt(dayItems.length)} txns</span>
+            <div className="dra-head">
+              <span className="dra-title">This day’s transactions</span>
+              <span className="dra-count">{fmtInt(dayItems.length)} txns</span>
+            </div>
+            <div className="dra-buttons">
+              <button className="export-btn" onClick={exportDayCSV} disabled={!dayItems.length}>
+                <span className="material-symbols-outlined">table_view</span>CSV
+              </button>
+              <button className="export-btn" onClick={exportDayExcel} disabled={!dayItems.length}>
+                <span className="material-symbols-outlined">grid_on</span>Excel
+              </button>
             </div>
             {canSend && (
-              <button className="btn sm" style={{ marginTop: 8 }} onClick={onSendReport} disabled={sending || !dayItems.length}
+              <button className="btn sm dra-send" onClick={onSendReport} disabled={sending || !dayItems.length}
                       title="Email this day’s report (PDF + Excel) to the merchant">
                 {sending ? 'Sending…' : '✉ Send day report'}
               </button>
