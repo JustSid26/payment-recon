@@ -237,8 +237,9 @@ function lineItemRows(items: SettlementLineItem[], ccy: string): (string | numbe
   ]
 }
 
-export default function SettlementDetailPage() {
-  const { uuid } = useParams<{ uuid: string }>()
+export default function SettlementDetailPage({ uuid: uuidProp, embedded }: { uuid?: string; embedded?: boolean } = {}) {
+  const params = useParams<{ uuid: string }>()
+  const uuid = uuidProp ?? params.uuid
   const isAdmin = getUser()?.role === 'admin'
   const { data: s, loading, reload } = useApi(() => api<SettlementDetail>(`/api/settlements/${uuid}`), [uuid])
   const lines = useApi(() => api<{ items: SettlementLineItem[] }>(`/api/settlements/${uuid}/items`), [uuid])
@@ -344,7 +345,7 @@ export default function SettlementDetailPage() {
   if (loading || !s) {
     return (
       <div>
-        <Link to="/settlements" className="back-link">← Settlements</Link>
+        {!embedded && <Link to="/settlements" className="back-link">← Settlements</Link>}
         <LoadingBlock label="Loading settlement…" />
       </div>
     )
@@ -486,7 +487,7 @@ export default function SettlementDetailPage() {
   return (
     <div className="stack">
       <div data-print="hide">
-        <Link to="/settlements" className="back-link">← Settlements</Link>
+        {!embedded && <Link to="/settlements" className="back-link">← Settlements</Link>}
         <div className="page-head" style={{ marginBottom: 0 }}>
           <div>
             <h1 style={{ display: 'flex', alignItems: 'center', gap: 12 }}>

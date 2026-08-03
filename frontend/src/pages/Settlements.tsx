@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { api, getUser } from '../lib/api'
 import { useApi } from '../lib/useApi'
@@ -6,6 +6,7 @@ import type { Merchant, Settlement } from '../lib/types'
 import { fmtDate, fmtInt } from '../lib/money'
 import { DataTable, EmptyState, MoneyCell, StatusChip, type Column } from '../components/ui'
 import DailySettlementRecords from '../components/DailySettlementRecords'
+import SettlementDetailPage from './SettlementDetail'
 
 const CURRENCIES = ['EUR', 'USD', 'AUD', 'CAD', 'GBP', 'JPY']
 
@@ -118,22 +119,20 @@ export default function Settlements() {
         ) : (
           <DailySettlementRecords key={dailyUuid} merchantUuid={dailyUuid} merchantName={dailyName} />
         )
-      ) : (
+      ) : isAdmin ? (
       <div className="card">
         <div className="filter-bar">
-          {isAdmin && (
-            <select
-              className="select"
-              style={{ maxWidth: 240 }}
-              value={merchantUuid}
-              onChange={(e) => setMerchantUuid(e.target.value)}
-            >
-              <option value="">All merchants</option>
-              {(merchants.data?.items ?? []).map((m) => (
-                <option key={m.merchant_uuid} value={m.merchant_uuid}>{m.name}</option>
-              ))}
-            </select>
-          )}
+          <select
+            className="select"
+            style={{ maxWidth: 240 }}
+            value={merchantUuid}
+            onChange={(e) => setMerchantUuid(e.target.value)}
+          >
+            <option value="">All merchants</option>
+            {(merchants.data?.items ?? []).map((m) => (
+              <option key={m.merchant_uuid} value={m.merchant_uuid}>{m.name}</option>
+            ))}
+          </select>
           <select className="select" value={currency} onChange={(e) => setCurrency(e.target.value)}>
             <option value="">All currencies</option>
             {CURRENCIES.map((c) => (
@@ -157,11 +156,81 @@ export default function Settlements() {
           empty={
             <EmptyState
               title="No settlements yet"
-              hint={isAdmin ? 'Generate one from a merchant page' : 'Settlements will appear here once generated'}
+              hint="Generate one from a merchant page"
             />
           }
         />
       </div>
+      ) : (
+        <MerchantSettlementReport settlements={data?.items ?? []} loading={loading} />
+      )}
+    </div>
+  )
+}
+
+/** Merchant view: no list to click through — show a settlement report directly,
+ *  narrowed by currency + date. The currency picker selects which report; the
+ *  date range keeps only settlements whose window overlaps it. */
+function MerchantSettlementReport({ settlements, loading }: { settlements: Settlement[]; loading: boolean }) {
+  const [currency, setCurrency] = useState('')
+  const [dateFrom, setDateFrom] = useState('')
+  const [dateTo, setDateTo] = useState('')
+
+  const currencies = useMemo(
+    () => [...new Set(settlements.map((s) => s.currency))].sort(),
+    [settlements],
+  )
+
+  const filtered = useMemo(() => {
+    return settlements
+      .filter((s) => {
+        if (currency && s.currency !== currency) return false
+        const wStart = s.window_start.slice(0, 10)
+        const wEnd = s.window_end.slice(0, 10)
+        if (dateFrom && wEnd < dateFrom) return false
+        if (dateTo && wStart > dateTo) return false
+        return true
+      })
+      .sort((a, b) => b.window_end.localeCompare(a.window_end))
+  }, [settlements, currency, dateFrom, dateTo])
+
+  const selected = filtered[0] ?? null
+  const hasFilters = Boolean(currency || dateFrom || dateTo)
+
+  return (
+    <div className="stack">
+      <div className="card">
+        <div className="filter-bar">
+          <select className="select" style={{ maxWidth: 200 }} value={currency} onChange={(e) => setCurrency(e.target.value)}>
+            <option value="">All currencies</option>
+            {currencies.map((c) => (
+              <option key={c} value={c}>{c}</option>
+            ))}
+          </select>
+          <span className="dim small">From</span>
+          <input className="input sm" type="date" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)} />
+          <span className="dim small">to</span>
+          <input className="input sm" type="date" value={dateTo} onChange={(e) => setDateTo(e.target.value)} />
+          {hasFilters && (
+            <button className="btn sm" onClick={() => { setCurrency(''); setDateFrom(''); setDateTo('') }}>Clear</button>
+          )}
+          {filtered.length > 1 && (
+            <span className="dim small" style={{ marginLeft: 'auto' }}>
+              Showing the latest of {fmtInt(filtered.length)} — pick a currency or narrow the dates to see another
+            </span>
+          )}
+        </div>
+      </div>
+
+      {loading ? (
+        <div className="card" style={{ padding: 32, textAlign: 'center', color: 'var(--ink-2)' }}>Loading settlements…</div>
+      ) : selected ? (
+        <SettlementDetailPage key={selected.settlement_uuid} uuid={selected.settlement_uuid} embedded />
+      ) : (
+        <EmptyState
+          title="No settlement report to show"
+          hint={hasFilters ? 'No settlement matches these filters' : 'Settlements will appear here once generated'}
+        />
       )}
     </div>
   )

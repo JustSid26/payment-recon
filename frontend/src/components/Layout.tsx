@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useState } from 'react'
 import { NavLink, Outlet, useNavigate } from 'react-router-dom'
 import { api, ApiError, clearSession, getUser } from '../lib/api'
 import { Modal, toastError, toastSuccess } from './ui'
@@ -24,13 +24,10 @@ const MERCHANT_NAV = [
   { to: '/ledger', label: 'Ledger', icon: 'account_balance_wallet' },
 ]
 
-const PRESENTATION_KEY = 'tw_presentation'
-
 export default function Layout() {
   const navigate = useNavigate()
   const user = getUser()
 
-  const [presentation, setPresentation] = useState<boolean>(() => localStorage.getItem(PRESENTATION_KEY) === '1')
   const [showReset, setShowReset] = useState(false)
   const [resetting, setResetting] = useState(false)
   const [showPwd, setShowPwd] = useState(false)
@@ -38,13 +35,6 @@ export default function Layout() {
   const [newPwd, setNewPwd] = useState('')
   const [confirmPwd, setConfirmPwd] = useState('')
   const [savingPwd, setSavingPwd] = useState(false)
-
-  useEffect(() => {
-    document.body.classList.toggle('presentation', presentation)
-    localStorage.setItem(PRESENTATION_KEY, presentation ? '1' : '0')
-  }, [presentation])
-
-  useEffect(() => () => document.body.classList.remove('presentation'), [])
 
   if (!user) return null
 
@@ -142,18 +132,7 @@ export default function Layout() {
 
       <div className="content">
         <header className="topbar">
-          <div className="tb-demo">
-            <label className="switch" title="Client-facing presentation mode">
-              <input
-                type="checkbox"
-                checked={presentation}
-                onChange={(e) => setPresentation(e.target.checked)}
-              />
-              <span className="track"><span className="thumb" /></span>
-              <span className="switch-label">Presentation mode</span>
-            </label>
-          </div>
-          <div className="tb-actions">
+          <div className="tb-actions" style={{ marginLeft: 'auto' }}>
             {isAdmin && (
               <button className="btn sm" onClick={() => setShowReset(true)}>
                 ⟳ Reset demo
