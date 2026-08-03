@@ -908,20 +908,6 @@ function DailyStatement({
           {dayCode && (
             <div className="win num">Day code <b className="mono">{dayCode}</b></div>
           )}
-          <div className="export-group" data-print="hide" style={{ marginTop: 10 }}>
-            <span className="export-label">This day’s transactions</span>
-            <button className="export-btn" onClick={exportDayCSV} disabled={!dayItems.length}>CSV</button>
-            <button className="export-btn" onClick={exportDayExcel} disabled={!dayItems.length}>Excel</button>
-            <span className="dim small">{fmtInt(dayItems.length)} txns</span>
-          </div>
-          {canSend && (
-            <div data-print="hide" style={{ marginTop: 10 }}>
-              <button className="btn sm" onClick={onSendReport} disabled={sending || !dayItems.length}
-                      title="Email this day’s report (PDF + Excel) to the merchant">
-                {sending ? 'Sending…' : '✉ Send day report'}
-              </button>
-            </div>
-          )}
         </div>
         <div className="daily-approve-box">
           <div className="kicker">Counts</div>
@@ -948,6 +934,20 @@ function DailyStatement({
             {canConfirmDay && (
               <button className="btn primary sm" style={{ marginTop: 10 }} disabled={confirming} onClick={onConfirmDay}>
                 ✓ Confirm this day only
+              </button>
+            )}
+          </div>
+          <div className="daily-report-actions" data-print="hide">
+            <div className="export-group">
+              <span className="export-label">This day’s transactions</span>
+              <button className="export-btn" onClick={exportDayCSV} disabled={!dayItems.length}>CSV</button>
+              <button className="export-btn" onClick={exportDayExcel} disabled={!dayItems.length}>Excel</button>
+              <span className="dim small">{fmtInt(dayItems.length)} txns</span>
+            </div>
+            {canSend && (
+              <button className="btn sm" style={{ marginTop: 8 }} onClick={onSendReport} disabled={sending || !dayItems.length}
+                      title="Email this day’s report (PDF + Excel) to the merchant">
+                {sending ? 'Sending…' : '✉ Send day report'}
               </button>
             )}
           </div>
