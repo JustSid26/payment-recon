@@ -751,6 +751,37 @@ table.data tbody tr.click:hover { background: #f8faff; }
 .link-btn:hover:not(:disabled) { color: var(--ink); text-decoration: underline; }
 .link-btn:disabled { opacity: .5; cursor: default; }
 
+/* Login role toggle (Merchant / Admin) */
+.role-toggle {
+  display: flex; gap: 4px; padding: 4px; margin-top: 4px;
+  background: var(--surface-2, #f3f4f6); border: 1px solid var(--border);
+  border-radius: 999px;
+}
+.role-toggle button {
+  flex: 1; border: none; background: none; cursor: pointer;
+  padding: 8px 12px; border-radius: 999px; font-size: 13.5px; font-weight: 600;
+  color: var(--ink-2);
+}
+.role-toggle button.on {
+  background: var(--surface, #fff); color: var(--ink);
+  box-shadow: var(--shadow, 0 1px 2px rgba(0,0,0,.08));
+}
+.role-toggle button:hover:not(.on) { color: var(--ink); }
+
+.login-heading { margin-top: 2px; }
+.login-heading h2 { font-size: 18px; font-weight: 700; margin: 0 0 2px; }
+
+/* Password field with show/hide eye */
+.pw-field { position: relative; }
+.pw-field .input { padding-right: 40px; }
+.pw-toggle {
+  position: absolute; top: 0; right: 0; height: 100%; width: 38px;
+  display: flex; align-items: center; justify-content: center;
+  background: none; border: none; cursor: pointer; color: var(--ink-3);
+}
+.pw-toggle:hover { color: var(--ink-2); }
+.pw-toggle .material-symbols-outlined { font-size: 19px; }
+
 /* ============ Ledger event cards (demo centerpiece) ============ */
 
 .event-card {
