@@ -738,6 +738,19 @@ table.data tbody tr.click:hover { background: #f8faff; }
   border-radius: 8px; padding: 9px 12px; font-size: 12.5px;
 }
 
+.form-notice {
+  background: var(--blue-bg, #eff6ff); border: 1px solid var(--blue-border, #bfdbfe);
+  color: var(--blue, #2563eb);
+  border-radius: 8px; padding: 9px 12px; font-size: 12.5px;
+}
+
+.link-btn {
+  background: none; border: none; padding: 0; margin: 2px auto 0;
+  color: var(--ink-2); font-size: 12.5px; cursor: pointer; text-align: center;
+}
+.link-btn:hover:not(:disabled) { color: var(--ink); text-decoration: underline; }
+.link-btn:disabled { opacity: .5; cursor: default; }
+
 /* ============ Ledger event cards (demo centerpiece) ============ */
 
 .event-card {

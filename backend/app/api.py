@@ -114,36 +114,144 @@ class LoginBody(BaseModel):
     password: str
 
 
+MIN_PASSWORD_LEN = 6
+
+
+def _resolve_merchant_login(cur, identifier: str):
+    """Find a merchant by member_id (exact) or contact email (case-insensitive).
+    member_id wins if both somehow match. Returns the row dict or None."""
+    cur.execute(
+        """SELECT id, merchant_uuid, name, member_id, email
+             FROM merchants
+            WHERE member_id = %(id)s OR lower(email) = lower(%(id)s)
+            ORDER BY (member_id = %(id)s) DESC, id
+            LIMIT 1""",
+        {"id": identifier},
+    )
+    return cur.fetchone()
+
+
+def _merchant_session(m, token_sub: str):
+    """Build the {token, user} payload for a logged-in merchant."""
+    merchant_uuid = str(m["merchant_uuid"])
+    token = auth_mod.mint(token_sub, m["name"], "merchant", merchant_uuid, m["id"])
+    return {"token": token, "user": {"name": m["name"], "role": "merchant",
+                                     "merchant_uuid": merchant_uuid,
+                                     "merchant_name": m["name"]}}
+
+
 @app.post("/api/auth/login")
 def login(body: LoginBody):
-    u = auth_mod.DEMO_USERS.get(body.email.lower())
-    if not u or u["password"] != body.password:
-        err(401, "bad_credentials", "invalid email or password")
-    merchant_uuid = merchant_id = merchant_name = None
-    if u["merchant_match"]:
-        with get_pool().connection() as conn:
-            cur = conn.cursor()
-            # Prefer the demo's named merchant if it's present; otherwise fall back to
-            # the merchant with the most transactions so the merchant portal always
-            # works after a reset + partial upload (demo resilience).
-            cur.execute("SELECT id, merchant_uuid, name FROM merchants WHERE name=%s",
-                        (u["merchant_match"],))
-            m = cur.fetchone()
-            if m is None:
-                cur.execute("""
-                    SELECT m.id, m.merchant_uuid, m.name, COUNT(t.id) AS n
-                      FROM merchants m LEFT JOIN transactions t ON t.merchant_id=m.id
-                     GROUP BY m.id, m.merchant_uuid, m.name
-                     ORDER BY n DESC, m.id LIMIT 1""")
+    identifier = body.email.strip()
+    # 1) Seeded demo accounts (admin + the canned Canamoney merchant) keep working.
+    u = auth_mod.DEMO_USERS.get(identifier.lower())
+    if u:
+        if u["password"] != body.password:
+            err(401, "bad_credentials", "invalid email or password")
+        merchant_uuid = merchant_id = merchant_name = None
+        if u["merchant_match"]:
+            with get_pool().connection() as conn:
+                cur = conn.cursor()
+                # Prefer the demo's named merchant if present; otherwise fall back to
+                # the merchant with the most transactions so the portal always works
+                # after a reset + partial upload (demo resilience).
+                cur.execute("SELECT id, merchant_uuid, name FROM merchants WHERE name=%s",
+                            (u["merchant_match"],))
                 m = cur.fetchone()
-            if m is None:
-                err(503, "no_merchants", "no merchant data uploaded yet — upload a "
-                    "transaction file first, then sign in as a merchant")
-            merchant_uuid, merchant_id, merchant_name = str(m["merchant_uuid"]), m["id"], m["name"]
-    token = auth_mod.issue(body.email.lower(), merchant_uuid, merchant_id)
-    return {"token": token, "user": {"name": u["name"], "role": u["role"],
-                                     "merchant_uuid": merchant_uuid,
-                                     "merchant_name": merchant_name}}
+                if m is None:
+                    cur.execute("""
+                        SELECT m.id, m.merchant_uuid, m.name, COUNT(t.id) AS n
+                          FROM merchants m LEFT JOIN transactions t ON t.merchant_id=m.id
+                         GROUP BY m.id, m.merchant_uuid, m.name
+                         ORDER BY n DESC, m.id LIMIT 1""")
+                    m = cur.fetchone()
+                if m is None:
+                    err(503, "no_merchants", "no merchant data uploaded yet — upload a "
+                        "transaction file first, then sign in as a merchant")
+                merchant_uuid, merchant_id, merchant_name = str(m["merchant_uuid"]), m["id"], m["name"]
+        token = auth_mod.issue(identifier.lower(), merchant_uuid, merchant_id)
+        return {"token": token, "user": {"name": u["name"], "role": u["role"],
+                                         "merchant_uuid": merchant_uuid,
+                                         "merchant_name": merchant_name}}
+
+    # 2) Self-service merchant: look up by member_id or contact email.
+    with get_pool().connection() as conn:
+        cur = conn.cursor()
+        m = _resolve_merchant_login(cur, identifier)
+        if m is None:
+            err(401, "bad_credentials", "invalid merchant ID / email or password")
+        cur.execute("SELECT password_hash FROM merchant_credentials WHERE member_id=%s",
+                    (m["member_id"],))
+        cred = cur.fetchone()
+        if cred is None:
+            # No password chosen yet — the frontend routes this to the "set a
+            # password" first-login flow rather than showing a login failure.
+            err(409, "no_password_set",
+                "no password set for this merchant yet — set one to continue")
+        if not auth_mod.verify_password(body.password, cred["password_hash"]):
+            err(401, "bad_credentials", "invalid merchant ID / email or password")
+        return _merchant_session(m, m["member_id"])
+
+
+class MerchantSetPasswordBody(BaseModel):
+    identifier: str
+    password: str
+
+
+@app.post("/api/auth/merchant/set-password")
+def merchant_set_password(body: MerchantSetPasswordBody):
+    """First-login claim: a merchant with no password yet chooses one and is
+    signed in. Refuses if a password already exists (change it while signed in)."""
+    if len(body.password) < MIN_PASSWORD_LEN:
+        err(400, "weak_password", f"password must be at least {MIN_PASSWORD_LEN} characters")
+    with get_pool().connection() as conn:
+        cur = conn.cursor()
+        m = _resolve_merchant_login(cur, body.identifier.strip())
+        if m is None:
+            err(404, "unknown_merchant", "no merchant found with that ID or email")
+        cur.execute("SELECT 1 FROM merchant_credentials WHERE member_id=%s", (m["member_id"],))
+        if cur.fetchone() is not None:
+            err(409, "password_already_set",
+                "this merchant already has a password — sign in, or change it once signed in")
+        cur.execute(
+            "INSERT INTO merchant_credentials (member_id, password_hash) VALUES (%s, %s)",
+            (m["member_id"], auth_mod.hash_password(body.password)),
+        )
+        conn.commit()
+        return _merchant_session(m, m["member_id"])
+
+
+class ChangePasswordBody(BaseModel):
+    current_password: str
+    new_password: str
+
+
+@app.post("/api/auth/merchant/change-password")
+def merchant_change_password(body: ChangePasswordBody, user: dict = Depends(current_user)):
+    if user.get("role") != "merchant":
+        err(403, "forbidden", "only merchants have a self-service password")
+    if len(body.new_password) < MIN_PASSWORD_LEN:
+        err(400, "weak_password", f"password must be at least {MIN_PASSWORD_LEN} characters")
+    with get_pool().connection() as conn:
+        cur = conn.cursor()
+        cur.execute("SELECT member_id FROM merchants WHERE id=%s", (user["merchant_id"],))
+        row = cur.fetchone()
+        if row is None:
+            err(404, "unknown_merchant", "merchant no longer exists")
+        member_id = row["member_id"]
+        cur.execute("SELECT password_hash FROM merchant_credentials WHERE member_id=%s",
+                    (member_id,))
+        cred = cur.fetchone()
+        if cred is None:
+            err(409, "no_password_set", "no password set yet")
+        if not auth_mod.verify_password(body.current_password, cred["password_hash"]):
+            err(401, "bad_credentials", "current password is incorrect")
+        cur.execute(
+            "UPDATE merchant_credentials SET password_hash=%s, updated_at=now() WHERE member_id=%s",
+            (auth_mod.hash_password(body.new_password), member_id),
+        )
+        conn.commit()
+        return {"ok": True}
 
 
 # ---------------------------------------------------------------- dashboard

@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { NavLink, Outlet, useNavigate } from 'react-router-dom'
-import { api, clearSession, getUser } from '../lib/api'
+import { api, ApiError, clearSession, getUser } from '../lib/api'
 import { Modal, toastError, toastSuccess } from './ui'
 import type { AdminStatus } from '../lib/types'
 
@@ -33,6 +33,11 @@ export default function Layout() {
   const [presentation, setPresentation] = useState<boolean>(() => localStorage.getItem(PRESENTATION_KEY) === '1')
   const [showReset, setShowReset] = useState(false)
   const [resetting, setResetting] = useState(false)
+  const [showPwd, setShowPwd] = useState(false)
+  const [curPwd, setCurPwd] = useState('')
+  const [newPwd, setNewPwd] = useState('')
+  const [confirmPwd, setConfirmPwd] = useState('')
+  const [savingPwd, setSavingPwd] = useState(false)
 
   useEffect(() => {
     document.body.classList.toggle('presentation', presentation)
@@ -55,6 +60,32 @@ export default function Layout() {
   const logout = () => {
     clearSession()
     navigate('/login')
+  }
+
+  const closePwd = () => {
+    if (savingPwd) return
+    setShowPwd(false)
+    setCurPwd('')
+    setNewPwd('')
+    setConfirmPwd('')
+  }
+
+  const changePassword = async () => {
+    if (newPwd.length < 6) return toastError('New password must be at least 6 characters')
+    if (newPwd !== confirmPwd) return toastError('New passwords do not match')
+    setSavingPwd(true)
+    try {
+      await api('/api/auth/merchant/change-password', {
+        method: 'POST',
+        body: { current_password: curPwd, new_password: newPwd },
+      })
+      toastSuccess('Password changed')
+      closePwd()
+    } catch (e) {
+      toastError(e instanceof ApiError ? e.message : 'Could not change password')
+    } finally {
+      setSavingPwd(false)
+    }
   }
 
   const doReset = async () => {
@@ -128,6 +159,11 @@ export default function Layout() {
                 ⟳ Reset demo
               </button>
             )}
+            {!isAdmin && (
+              <button className="btn sm" onClick={() => setShowPwd(true)}>
+                🔑 Change password
+              </button>
+            )}
             <button className="btn sm" onClick={logout}>Sign out</button>
           </div>
         </header>
@@ -159,6 +195,41 @@ export default function Layout() {
             upload fresh in front of the client.
           </div>
           <div className="dim small">This cannot be undone.</div>
+        </Modal>
+      )}
+
+      {showPwd && (
+        <Modal
+          title="Change your password"
+          onClose={closePwd}
+          footer={
+            <>
+              <button className="btn" onClick={closePwd} disabled={savingPwd}>Cancel</button>
+              <button className="btn primary" onClick={() => void changePassword()} disabled={savingPwd}>
+                {savingPwd ? 'Saving…' : 'Update password'}
+              </button>
+            </>
+          }
+        >
+          <div className="form" style={{ gap: 12 }}>
+            <div className="field">
+              <label htmlFor="cur-pwd">Current password</label>
+              <input id="cur-pwd" className="input" type="password" autoComplete="current-password"
+                value={curPwd} onChange={(e) => setCurPwd(e.target.value)} />
+            </div>
+            <div className="field">
+              <label htmlFor="new-pwd">New password</label>
+              <input id="new-pwd" className="input" type="password" autoComplete="new-password"
+                placeholder="At least 6 characters"
+                value={newPwd} onChange={(e) => setNewPwd(e.target.value)} />
+            </div>
+            <div className="field">
+              <label htmlFor="confirm-pwd">Confirm new password</label>
+              <input id="confirm-pwd" className="input" type="password" autoComplete="new-password"
+                value={confirmPwd} onChange={(e) => setConfirmPwd(e.target.value)}
+                onKeyDown={(e) => e.key === 'Enter' && void changePassword()} />
+            </div>
+          </div>
         </Modal>
       )}
     </div>

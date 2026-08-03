@@ -279,6 +279,20 @@ CREATE TABLE IF NOT EXISTS fee_schedule_memory (
   PRIMARY KEY (match_type, match_key)
 );
 
+-- Merchant self-service login. A merchant signs in with their member_id (or
+-- contact email) plus a password THEY choose on first login. Keyed by member_id
+-- (the business ID printed on statements) with NO FK to merchants, so — like
+-- fee_schedule_memory — a "Reset demo" that truncates merchants does NOT wipe a
+-- merchant's saved password; a re-import re-creates the merchant and their login
+-- keeps working. A member_id with no row here has not set a password yet and can
+-- claim its account by setting one at the login screen.
+CREATE TABLE IF NOT EXISTS merchant_credentials (
+  member_id     TEXT PRIMARY KEY,
+  password_hash TEXT NOT NULL,
+  created_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at    TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
 -- Reusable, named fee presets (e.g. Workbook, Canamoney) for onboarding merchants.
 CREATE TABLE IF NOT EXISTS fee_presets (
   name                    TEXT PRIMARY KEY,

@@ -1,6 +1,8 @@
 """Demo auth: JWT with two seeded accounts. Production design: docs/08."""
 from __future__ import annotations
 
+import hashlib
+import hmac
 import os
 import secrets
 import time
@@ -30,14 +32,45 @@ DEMO_USERS = {
 }
 
 
-def issue(email: str, merchant_uuid: str | None, merchant_id: int | None) -> str:
-    u = DEMO_USERS[email]
+def mint(sub: str, name: str, role: str,
+         merchant_uuid: str | None, merchant_id: int | None) -> str:
+    """Sign a session token for any principal (demo user or self-service merchant)."""
     return jwt.encode(
-        {"sub": email, "name": u["name"], "role": u["role"],
+        {"sub": sub, "name": name, "role": role,
          "merchant_uuid": merchant_uuid, "merchant_id": merchant_id,
          "exp": int(time.time()) + TTL},
         SECRET, algorithm="HS256",
     )
+
+
+def issue(email: str, merchant_uuid: str | None, merchant_id: int | None) -> str:
+    u = DEMO_USERS[email]
+    return mint(email, u["name"], u["role"], merchant_uuid, merchant_id)
+
+
+# --- Merchant self-service passwords ------------------------------------------
+# Dependency-free password hashing: PBKDF2-HMAC-SHA256 (stdlib). Stored as
+# "pbkdf2_sha256$<iterations>$<salt_hex>$<hash_hex>" so the parameters travel with
+# the hash and can be tuned later without breaking existing rows.
+_PBKDF2_ITERATIONS = 240_000
+
+
+def hash_password(password: str) -> str:
+    salt = secrets.token_bytes(16)
+    dk = hashlib.pbkdf2_hmac("sha256", password.encode(), salt, _PBKDF2_ITERATIONS)
+    return f"pbkdf2_sha256${_PBKDF2_ITERATIONS}${salt.hex()}${dk.hex()}"
+
+
+def verify_password(password: str, stored: str) -> bool:
+    try:
+        algo, iters, salt_hex, hash_hex = stored.split("$")
+        if algo != "pbkdf2_sha256":
+            return False
+        dk = hashlib.pbkdf2_hmac("sha256", password.encode(),
+                                 bytes.fromhex(salt_hex), int(iters))
+    except (ValueError, TypeError):
+        return False
+    return hmac.compare_digest(dk.hex(), hash_hex)
 
 
 def current_user(request: Request) -> dict:
