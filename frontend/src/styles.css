@@ -772,8 +772,8 @@ table.data tbody tr.click:hover { background: #f8faff; }
 .login-heading h2 { font-size: 18px; font-weight: 700; margin: 0 0 2px; }
 
 /* Password field with show/hide eye */
-.pw-field { position: relative; }
-.pw-field .input { padding-right: 40px; }
+.pw-field { position: relative; display: block; }
+.pw-field .input { width: 100%; padding-right: 40px; }
 .pw-toggle {
   position: absolute; top: 0; right: 0; height: 100%; width: 38px;
   display: flex; align-items: center; justify-content: center;
