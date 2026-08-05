@@ -29,6 +29,10 @@ export default function Reserve() {
 
   const ccy = reserve.data?.currency ?? activeCcy ?? 'USD'
 
+  const items = reserve.data?.items ?? []
+  const periodHeld = items.reduce((s, r) => s + Math.abs(r.held_minor), 0)
+  const periodReleased = items.reduce((s, r) => s + Math.abs(r.released_minor), 0)
+
   return (
     <div className="stack">
       <div className="page-head">
@@ -51,12 +55,25 @@ export default function Reserve() {
       </div>
 
       {reserve.data && (
-        <div className="grid grid-cards">
-          <div className="card stat-card">
-            <div className="label">
-              <span className="ccy-tag">{ccy}</span> Current reserve held
+        <div className="money-hero">
+          <div className="card money-card">
+            <div className="mh-top">
+              <span className="ccy-tag">{ccy}</span>
             </div>
-            <div className="value">{fmtMoney(reserve.data.current_reserve_minor, ccy)}</div>
+            <div className="mh-primary">
+              <span className="mh-label">Reserve held right now</span>
+              <span className="mh-value">{fmtMoney(reserve.data.current_reserve_minor, ccy)}</span>
+            </div>
+            <div className="mh-split">
+              <div className="mh-metric">
+                <span className="mh-sub">Held (this period)</span>
+                <b>{fmtMoney(periodHeld, ccy)}</b>
+              </div>
+              <div className="mh-metric">
+                <span className="mh-sub">Released back</span>
+                <b>{fmtMoney(periodReleased, ccy)}</b>
+              </div>
+            </div>
           </div>
         </div>
       )}
