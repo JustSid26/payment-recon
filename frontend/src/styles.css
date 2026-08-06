@@ -736,11 +736,6 @@ table.data tbody tr.click:hover { background: #f8faff; }
 .filter-bar {
   display: flex; gap: 10px; flex-wrap: wrap; align-items: center;
   padding: 12px 14px;
-  position: sticky; top: 55px; z-index: 5;
-  background: var(--surface);
-  border-bottom: 1px solid var(--border);
-  border-top-left-radius: var(--radius);
-  border-top-right-radius: var(--radius);
 }
 
 /* ============ Login ============ */
