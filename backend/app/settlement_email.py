@@ -181,6 +181,8 @@ def _pdf_report(merchant: str, ccy: str, code: str, window: str, counts: dict,
 
     pct = lambda bps: f"({bps / 100:.2f}%)" if bps is not None else ""      # noqa: E731
     amt = lambda m: f"({_money(m, ccy)})" if m is not None else ""          # noqa: E731
+    # per-transaction fee: show the rate and the count it's charged on, e.g. ($0.35 × 77)
+    fee = lambda m, n: f"({_money(m, ccy)} × {n})" if m is not None else ""  # noqa: E731
 
     y = 802
     txt(50, y, "SETTLEMENT STATEMENT", 9, False, _GRAY); y -= 20
@@ -196,12 +198,12 @@ def _pdf_report(merchant: str, ccy: str, code: str, window: str, counts: dict,
     rows = [
         ("Gross captured", int(bd.get("gross_captured_minor", 0) or 0), "", True, False, False),
         ("MDR", -abs(int(bd.get("mdr_minor", 0) or 0)), pct(fs.get("mdr_bps")), False, False, False),
-        ("Approved transaction fees", -abs(int(bd.get("approved_txn_fees_minor", 0) or 0)), amt(fs.get("approved_txn_fee_minor")), False, False, False),
-        ("Declined transaction fees", -abs(int(bd.get("declined_txn_fees_minor", 0) or 0)), amt(fs.get("declined_txn_fee_minor")), False, True, False),
+        ("Approved transaction fees", -abs(int(bd.get("approved_txn_fees_minor", 0) or 0)), fee(fs.get("approved_txn_fee_minor"), counts.get("paid", 0)), False, False, False),
+        ("Declined transaction fees", -abs(int(bd.get("declined_txn_fees_minor", 0) or 0)), fee(fs.get("declined_txn_fee_minor"), counts.get("declined", 0)), False, True, False),
         ("Refunds", -abs(int(bd.get("refunds_minor", 0) or 0)), "", False, True, False),
-        ("Refund fees", -abs(int(bd.get("refund_fees_minor", 0) or 0)), amt(fs.get("refund_fee_minor")), False, True, False),
+        ("Refund fees", -abs(int(bd.get("refund_fees_minor", 0) or 0)), fee(fs.get("refund_fee_minor"), counts.get("refunds", 0)), False, True, False),
         ("Chargebacks", -abs(int(bd.get("chargebacks_minor", 0) or 0)), "", False, True, False),
-        ("Chargeback fees", -abs(int(bd.get("chargeback_fees_minor", 0) or 0)), amt(fs.get("chargeback_fee_minor")), False, True, False),
+        ("Chargeback fees", -abs(int(bd.get("chargeback_fees_minor", 0) or 0)), fee(fs.get("chargeback_fee_minor"), counts.get("chargebacks", 0)), False, True, False),
         ("Reserve held", -abs(int(bd.get("reserve_held_minor", 0) or 0)), pct(fs.get("reserve_hold_bps")), False, False, False),
         ("Reserve released", abs(int(bd.get("reserve_released_minor", 0) or 0)), "", False, True, False),
         ("Adjustments", int(bd.get("adjustments_minor", 0) or 0), "", False, True, False),
