@@ -97,6 +97,10 @@ const percentBasis = (bps: number | undefined | null) => (bps == null ? undefine
 
 const basisLabel = (basis?: string) => (basis ? `(${basis})` : undefined)
 
+/** Per-transaction fee detail showing the count it's charged on, e.g. "$0.35 × 77". */
+const feeTimes = (minor: number | undefined | null, ccy: string, count: number) =>
+  minor == null ? undefined : `${fmtMoney(minor, ccy)} × ${fmtInt(count)}`
+
 const dayKey = (iso: string) => {
   const d = new Date(iso)
   return isNaN(d.getTime()) ? iso.slice(0, 10) : d.toISOString().slice(0, 10)
@@ -980,14 +984,14 @@ function DailyStatement({
             op="−"
             minor={-Math.abs(day.approved_fee_minor)}
             currency={ccy}
-            detail={basisLabel(fixedBasis(feeSchedule?.approved_txn_fee_minor, ccy))}
+            detail={basisLabel(feeTimes(feeSchedule?.approved_txn_fee_minor, ccy, day.payments))}
           />
           <Row
             label="Declined transaction fees"
             op="−"
             minor={-Math.abs(day.declined_fee_minor)}
             currency={ccy}
-            detail={basisLabel(fixedBasis(feeSchedule?.declined_txn_fee_minor, ccy))}
+            detail={basisLabel(feeTimes(feeSchedule?.declined_txn_fee_minor, ccy, day.declines))}
             dimZero
           />
           <Row label="Refunds" op="−" minor={-Math.abs(day.refunds_minor)} currency={ccy} dimZero />
@@ -996,7 +1000,7 @@ function DailyStatement({
             op="−"
             minor={-Math.abs(day.refund_fee_minor)}
             currency={ccy}
-            detail={basisLabel(fixedBasis(feeSchedule?.refund_fee_minor, ccy))}
+            detail={basisLabel(feeTimes(feeSchedule?.refund_fee_minor, ccy, day.refunds))}
             dimZero
           />
           <Row label="Chargebacks" op="−" minor={-Math.abs(day.chargebacks_minor)} currency={ccy} dimZero />
@@ -1005,7 +1009,7 @@ function DailyStatement({
             op="−"
             minor={-Math.abs(day.chargeback_fee_minor)}
             currency={ccy}
-            detail={basisLabel(fixedBasis(feeSchedule?.chargeback_fee_minor, ccy))}
+            detail={basisLabel(feeTimes(feeSchedule?.chargeback_fee_minor, ccy, day.chargebacks))}
             dimZero
           />
           <Row
@@ -1108,14 +1112,14 @@ function StatementView({ s, counts, dayPay }: { s: SettlementDetail; counts: Set
             op="−"
             minor={-Math.abs(b.approved_txn_fees_minor)}
             currency={ccy}
-            detail={basisLabel(fixedBasis(fs?.approved_txn_fee_minor, ccy))}
+            detail={basisLabel(feeTimes(fs?.approved_txn_fee_minor, ccy, counts.paid))}
           />
           <Row
             label="Declined transaction fees"
             op="−"
             minor={-Math.abs(b.declined_txn_fees_minor)}
             currency={ccy}
-            detail={basisLabel(fixedBasis(fs?.declined_txn_fee_minor, ccy))}
+            detail={basisLabel(feeTimes(fs?.declined_txn_fee_minor, ccy, counts.declined))}
           />
           <Row label="Refunds" op="−" minor={-Math.abs(b.refunds_minor)} currency={ccy} dimZero />
           <Row
@@ -1123,7 +1127,7 @@ function StatementView({ s, counts, dayPay }: { s: SettlementDetail; counts: Set
             op="−"
             minor={-Math.abs(b.refund_fees_minor)}
             currency={ccy}
-            detail={basisLabel(fixedBasis(fs?.refund_fee_minor, ccy))}
+            detail={basisLabel(feeTimes(fs?.refund_fee_minor, ccy, counts.refunds))}
             dimZero
           />
           <Row label="Chargebacks" op="−" minor={-Math.abs(b.chargebacks_minor)} currency={ccy} dimZero />
@@ -1132,7 +1136,7 @@ function StatementView({ s, counts, dayPay }: { s: SettlementDetail; counts: Set
             op="−"
             minor={-Math.abs(b.chargeback_fees_minor)}
             currency={ccy}
-            detail={basisLabel(fixedBasis(fs?.chargeback_fee_minor, ccy))}
+            detail={basisLabel(feeTimes(fs?.chargeback_fee_minor, ccy, counts.chargebacks))}
             dimZero
           />
           <Row
