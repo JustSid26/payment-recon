@@ -93,7 +93,7 @@ function aggregateRows(items: MerchantLedgerStatementRow[], dateFrom: string, da
         event_count: currencyRows.reduce((sum, row) => sum + row.event_count, 0),
         pay_status: wholeStatus,
         confirmation: latest?.confirmation ?? '',
-        settlement_code: latest?.settlement_code ?? '',
+        settlement_code: currencyRows.find((row) => row.settlement_code)?.settlement_code ?? '',
         day_code: '',
         confirmed: currencyRows.some((row) => row.confirmed),
       }
