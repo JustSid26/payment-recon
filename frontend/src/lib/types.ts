@@ -394,6 +394,8 @@ export interface MerchantLedgerStatementRow {
   event_count: number
   pay_status: LedgerPayStatus
   confirmation: string
+  settlement_code: string
+  day_code: string
   confirmed: boolean
 }
 

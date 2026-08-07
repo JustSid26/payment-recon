@@ -1174,11 +1174,11 @@ class MailTestBody(BaseModel):
 def send_mail_test(body: MailTestBody, user: dict = Depends(require_admin)):
     """Send a small test email to confirm the sending account works end-to-end."""
     html = (
-        "<p>This is a test email from <b>TransactWorld</b>.</p>"
+        "<p>This is a test email from <b>CoreServices</b>.</p>"
         "<p>If you received this, payout-confirmation emails will send from "
         f"<b>{mailer_mod.status().get('from') or 'this account'}</b>.</p>"
     )
-    return mailer_mod.send(body.to, "TransactWorld — test email", html)
+    return mailer_mod.send(body.to, "CoreServices — test email", html)
 
 
 # ---- Gmail OAuth "Connect" flow (mint the refresh token via the live app) ----
@@ -1555,6 +1555,7 @@ def merchant_ledger_entries(muuid: str, user: dict = Depends(current_user),
 def merchant_ledger_statement(muuid: str, user: dict = Depends(current_user),
                               page: int = 1, page_size: int = Query(50, le=5000),
                               q: str | None = None, status: str | None = None,
+                              currency: str | None = None,
                               date_from: str | None = None, date_to: str | None = None):
     """Merchant-facing daily ledger statement, one row per processed date/currency.
 
@@ -1577,9 +1578,12 @@ def merchant_ledger_statement(muuid: str, user: dict = Depends(current_user),
             filters.append("processed_date >= %(df)s::date"); p["df"] = date_from
         if date_to:
             filters.append("processed_date <= %(dt)s::date"); p["dt"] = date_to
+        if currency and currency.strip():
+            filters.append("currency = %(ccy)s"); p["ccy"] = currency.strip().upper()
         if q and q.strip():
             p["q"] = f"%{q.strip().replace(' ', '%')}%"
-            filters.append("(currency ILIKE %(q)s OR latest_event_uuid ILIKE %(q)s OR processed_date::text ILIKE %(q)s)")
+            filters.append("(currency ILIKE %(q)s OR conf_code ILIKE %(q)s "
+                           "OR latest_event_uuid ILIKE %(q)s OR processed_date::text ILIKE %(q)s)")
         status = (status or "").strip().lower()
         if status == "paid":
             filters.append("pay_status = 'paid'")
@@ -1618,7 +1622,8 @@ def merchant_ledger_statement(muuid: str, user: dict = Depends(current_user),
                 SELECT e.occurred_at::date AS processed_date, e.currency,
                        COUNT(*) AS cap_n,
                        COUNT(si.event_id) AS n_settled,
-                       COUNT(*) FILTER (WHERE s.state='completed' OR sdp.settlement_id IS NOT NULL) AS n_paid
+                       COUNT(*) FILTER (WHERE s.state='completed' OR sdp.settlement_id IS NOT NULL) AS n_paid,
+                       MAX(s.confirmation_code) AS conf_code
                   FROM ledger_events e
                   LEFT JOIN settlement_items si ON si.event_id=e.id
                   LEFT JOIN settlements s ON s.id=si.settlement_id
@@ -1627,7 +1632,7 @@ def merchant_ledger_statement(muuid: str, user: dict = Depends(current_user),
                  WHERE {w} AND e.event_type = ANY(%(ctypes)s) AND e.source_txn_id IS NOT NULL
                  GROUP BY 1, 2
             ), joined AS (
-                SELECT d.*,
+                SELECT d.*, ss.conf_code,
                        CASE
                          WHEN COALESCE(ss.cap_n, 0) = 0 THEN 'na'
                          WHEN ss.n_paid = ss.cap_n THEN 'paid'
@@ -1651,10 +1656,12 @@ def merchant_ledger_statement(muuid: str, user: dict = Depends(current_user),
         """, p)
         items = []
         for r in cur.fetchall():
-            confirm = r["latest_event_uuid"] or ""
+            code = r.get("conf_code") or ""             # whole-settlement confirmation code
+            iso = r["processed_date"].isoformat()
+            day_code = f"{code}-{iso.replace('-', '')}" if code else ""
             items.append({
-                "row_id": f"{r['processed_date'].isoformat()}:{r['currency']}",
-                "processed_date": r["processed_date"].isoformat(),
+                "row_id": f"{iso}:{r['currency']}",
+                "processed_date": iso,
                 "currency": r["currency"],
                 "processed_minor": int(r["processed_minor"] or 0),
                 "payable_minor": int(r["payable_minor"] or 0),
@@ -1662,8 +1669,10 @@ def merchant_ledger_statement(muuid: str, user: dict = Depends(current_user),
                 "paid_minor": int(r["paid_minor"] or 0),
                 "event_count": int(r["event_count"] or 0),
                 "pay_status": r["pay_status"],
-                "confirmation": confirm[:12],
-                "confirmed": bool(confirm),
+                "confirmation": code,
+                "settlement_code": code,
+                "day_code": day_code,
+                "confirmed": bool(code),
             })
         return {"items": items, "total": int(total), "page": page, "page_size": page_size}
 

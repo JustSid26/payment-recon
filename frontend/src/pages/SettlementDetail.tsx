@@ -365,7 +365,7 @@ export default function SettlementDetailPage({ uuid: uuidProp, embedded }: { uui
 
   // --- statement export (key/value, mirrors the printed statement) ---
   const statementRows = (): (string | number)[][] => [
-    ['TransactWorld — Settlement statement'],
+    ['CoreServices — Settlement statement'],
     ['Merchant', s.merchant_name],
     ['Currency', ccy],
     ['Window', `${fmtDate(s.window_start)} → ${fmtDate(s.window_end)}`],

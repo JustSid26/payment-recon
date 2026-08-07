@@ -1,0 +1,538 @@
+<!DOCTYPE html>
+
+<html class="light" lang="en"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>Merchant Detail - TransactWorld</title>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@100..900&display=swap" rel="stylesheet"/>
+<style>
+        .material-symbols-outlined {
+            font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24;
+            vertical-align: middle;
+        }
+        .tabular-nums {
+            font-variant-numeric: tabular-nums;
+        }
+        ::-webkit-scrollbar {
+            width: 6px;
+            height: 6px;
+        }
+        ::-webkit-scrollbar-track {
+            background: transparent;
+        }
+        ::-webkit-scrollbar-thumb {
+            background: #e2e1ed;
+            border-radius: 10px;
+        }
+        ::-webkit-scrollbar-thumb:hover {
+            background: #c4c5d7;
+        }
+    </style>
+<script id="tailwind-config">
+        tailwind.config = {
+          darkMode: "class",
+          theme: {
+            extend: {
+              "colors": {
+                      "on-secondary": "#ffffff",
+                      "surface-bright": "#faf8ff",
+                      "on-primary": "#ffffff",
+                      "background": "#faf8ff",
+                      "outline": "#747686",
+                      "on-secondary-fixed-variant": "#3e4755",
+                      "surface-container-low": "#f3f2fe",
+                      "surface-tint": "#2151da",
+                      "on-primary-fixed-variant": "#0039b5",
+                      "error": "#ba1a1a",
+                      "on-secondary-fixed": "#121c28",
+                      "on-primary-container": "#cad3ff",
+                      "primary-container": "#1d4ed8",
+                      "tertiary-fixed-dim": "#ffb59c",
+                      "tertiary-container": "#a73400",
+                      "on-tertiary-container": "#ffc9b7",
+                      "on-secondary-container": "#596372",
+                      "surface-container": "#ededf9",
+                      "surface-container-high": "#e8e7f3",
+                      "on-surface": "#1a1b23",
+                      "secondary": "#555f6d",
+                      "surface-container-highest": "#e2e1ed",
+                      "on-error-container": "#93000a",
+                      "surface-dim": "#d9d9e5",
+                      "on-tertiary-fixed-variant": "#832700",
+                      "on-primary-fixed": "#001551",
+                      "secondary-fixed": "#d9e3f4",
+                      "outline-variant": "#c4c5d7",
+                      "primary-fixed-dim": "#b7c4ff",
+                      "inverse-on-surface": "#f0f0fb",
+                      "tertiary-fixed": "#ffdbcf",
+                      "surface-variant": "#e2e1ed",
+                      "primary": "#0037b0",
+                      "on-surface-variant": "#434655",
+                      "error-container": "#ffdad6",
+                      "inverse-primary": "#b7c4ff",
+                      "inverse-surface": "#2e3039",
+                      "on-error": "#ffffff",
+                      "secondary-fixed-dim": "#bdc7d8",
+                      "surface-container-lowest": "#ffffff",
+                      "on-tertiary-fixed": "#390c00",
+                      "surface": "#faf8ff",
+                      "primary-fixed": "#dce1ff",
+                      "on-background": "#1a1b23",
+                      "tertiary": "#7f2500",
+                      "secondary-container": "#d6e0f1",
+                      "on-tertiary": "#ffffff"
+              },
+              "borderRadius": {
+                      "DEFAULT": "0.25rem",
+                      "lg": "0.5rem",
+                      "xl": "0.75rem",
+                      "full": "9999px"
+              },
+              "spacing": {
+                      "container-padding": "24px",
+                      "stack-lg": "32px",
+                      "stack-md": "16px",
+                      "stack-sm": "8px",
+                      "gutter": "16px",
+                      "base": "4px"
+              },
+              "fontFamily": {
+                      "body-lg": ["Inter"],
+                      "headline-lg": ["Inter"],
+                      "headline-sm": ["Inter"],
+                      "headline-md": ["Inter"],
+                      "label-md": ["Inter"],
+                      "number-lg": ["Inter"],
+                      "number-md": ["Inter"],
+                      "body-md": ["Inter"],
+                      "label-sm": ["Inter"]
+              },
+              "fontSize": {
+                      "body-lg": ["16px", {"lineHeight": "24px", "fontWeight": "400"}],
+                      "headline-lg": ["30px", {"lineHeight": "38px", "letterSpacing": "-0.02em", "fontWeight": "600"}],
+                      "headline-sm": ["18px", {"lineHeight": "28px", "fontWeight": "600"}],
+                      "headline-md": ["24px", {"lineHeight": "32px", "letterSpacing": "-0.02em", "fontWeight": "600"}],
+                      "label-md": ["13px", {"lineHeight": "18px", "letterSpacing": "0.01em", "fontWeight": "500"}],
+                      "number-lg": ["24px", {"lineHeight": "32px", "fontWeight": "600"}],
+                      "number-md": ["14px", {"lineHeight": "20px", "fontWeight": "500"}],
+                      "body-md": ["14px", {"lineHeight": "20px", "fontWeight": "400"}],
+                      "label-sm": ["12px", {"lineHeight": "16px", "fontWeight": "500"}]
+              }
+            },
+          },
+        }
+    </script>
+</head>
+<body class="bg-background text-on-background font-body-md min-h-screen">
+<!-- SideNavBar Anchor -->
+<aside class="fixed left-0 top-0 h-screen flex flex-col py-stack-lg bg-surface border-r border-outline-variant w-64 z-50">
+<div class="px-6 mb-stack-lg">
+<h1 class="font-headline-sm text-headline-sm font-semibold text-primary">TransactWorld</h1>
+<p class="font-label-sm text-label-sm text-outline">Merchant Portal</p>
+</div>
+<nav class="flex-1 space-y-1">
+<a class="flex items-center px-6 py-3 gap-3 text-on-surface-variant hover:bg-surface-container transition-colors" href="#">
+<span class="material-symbols-outlined">dashboard</span>
+<span class="font-body-md">Dashboard</span>
+</a>
+<a class="flex items-center px-6 py-3 gap-3 text-primary font-bold border-r-2 border-primary bg-surface-container-low transition-colors" href="#">
+<span class="material-symbols-outlined">storefront</span>
+<span class="font-body-md">Merchants</span>
+</a>
+<a class="flex items-center px-6 py-3 gap-3 text-on-surface-variant hover:bg-surface-container transition-colors" href="#">
+<span class="material-symbols-outlined">receipt_long</span>
+<span class="font-body-md">Transactions</span>
+</a>
+<a class="flex items-center px-6 py-3 gap-3 text-on-surface-variant hover:bg-surface-container transition-colors" href="#">
+<span class="material-symbols-outlined">payments</span>
+<span class="font-body-md">Settlements</span>
+</a>
+<a class="flex items-center px-6 py-3 gap-3 text-on-surface-variant hover:bg-surface-container transition-colors" href="#">
+<span class="material-symbols-outlined">account_balance_wallet</span>
+<span class="font-body-md">Ledger</span>
+</a>
+<a class="flex items-center px-6 py-3 gap-3 text-on-surface-variant hover:bg-surface-container transition-colors" href="#">
+<span class="material-symbols-outlined">verified_user</span>
+<span class="font-body-md">Integrity</span>
+</a>
+</nav>
+<div class="mt-auto px-6 space-y-1 border-t border-outline-variant pt-stack-md">
+<a class="flex items-center py-2 gap-3 text-on-surface-variant hover:bg-surface-container transition-colors" href="#">
+<span class="material-symbols-outlined">settings</span>
+<span class="font-label-md">Profile Settings</span>
+</a>
+<a class="flex items-center py-2 gap-3 text-on-surface-variant hover:bg-surface-container transition-colors" href="#">
+<span class="material-symbols-outlined">logout</span>
+<span class="font-label-md">Logout</span>
+</a>
+</div>
+</aside>
+<!-- Main Content Canvas -->
+<main class="ml-64 min-h-screen flex flex-col">
+<!-- TopNavBar Anchor -->
+<header class="flex justify-between items-center h-16 px-container-padding border-b border-outline-variant bg-background sticky top-0 z-40">
+<div class="flex items-center gap-4">
+<span class="font-label-sm text-outline">Merchants / Global Logistics Inc.</span>
+</div>
+<div class="flex items-center gap-stack-md">
+<div class="relative flex items-center bg-surface-container-high rounded-full px-4 py-1.5 w-64 border border-outline-variant">
+<span class="material-symbols-outlined text-outline scale-75">search</span>
+<input class="bg-transparent border-none focus:ring-0 text-label-md w-full placeholder-outline" placeholder="Search data..." type="text"/>
+</div>
+<div class="flex items-center gap-2">
+<span class="text-label-sm text-secondary">System Status</span>
+<div class="w-2 h-2 rounded-full bg-primary"></div>
+</div>
+<span class="material-symbols-outlined text-outline-variant hover:text-primary cursor-pointer transition-colors">notifications</span>
+<span class="material-symbols-outlined text-outline-variant hover:text-primary cursor-pointer transition-colors">help_outline</span>
+</div>
+</header>
+<!-- Viewport Padding -->
+<div class="p-container-padding max-w-[1440px] w-full mx-auto space-y-stack-lg">
+<!-- Header Section -->
+<section class="flex flex-col md:flex-row md:items-end justify-between gap-stack-md">
+<div class="space-y-1">
+<div class="flex items-center gap-3">
+<h2 class="font-headline-lg text-headline-lg text-on-surface">Global Logistics Inc.</h2>
+<span class="inline-flex items-center px-2.5 py-0.5 rounded-full bg-green-50 text-green-700 border border-green-200 font-label-sm">
+<span class="w-1.5 h-1.5 rounded-full bg-green-600 mr-1.5"></span>
+                            active
+                        </span>
+</div>
+<p class="text-on-surface-variant font-body-md">Merchant ID: MID-99203348-GLI</p>
+</div>
+<div class="flex gap-3">
+<button class="bg-white border border-outline-variant text-on-surface font-semibold px-4 py-2.5 rounded-lg hover:bg-surface-container transition-all flex items-center gap-2 font-label-md">
+<span class="material-symbols-outlined text-lg">history</span>
+                        View Audit Log
+                    </button>
+<button class="bg-primary-container text-on-primary font-semibold px-4 py-2.5 rounded-lg hover:opacity-90 transition-all flex items-center gap-2 font-label-md">
+<span class="material-symbols-outlined text-lg">payments</span>
+                        Generate settlement
+                    </button>
+</div>
+</section>
+<!-- Balance Tiles -->
+<section class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-gutter">
+<!-- USD Balance -->
+<div class="bg-surface-container-lowest border border-outline-variant p-stack-md rounded-xl space-y-2">
+<div class="flex justify-between items-center">
+<span class="text-label-sm text-outline uppercase tracking-wider font-semibold">Available USD</span>
+<span class="text-green-600 text-label-sm font-medium">+12.5%</span>
+</div>
+<div class="flex items-baseline gap-2">
+<span class="font-number-lg text-number-lg tabular-nums">42,850.22</span>
+<span class="text-label-sm text-outline">USD</span>
+</div>
+</div>
+<!-- EUR Balance -->
+<div class="bg-surface-container-lowest border border-outline-variant p-stack-md rounded-xl space-y-2">
+<div class="flex justify-between items-center">
+<span class="text-label-sm text-outline uppercase tracking-wider font-semibold">Available EUR</span>
+<span class="text-green-600 text-label-sm font-medium">+4.2%</span>
+</div>
+<div class="flex items-baseline gap-2">
+<span class="font-number-lg text-number-lg tabular-nums">18,120.50</span>
+<span class="text-label-sm text-outline">EUR</span>
+</div>
+</div>
+<!-- GBP Balance -->
+<div class="bg-surface-container-lowest border border-outline-variant p-stack-md rounded-xl space-y-2">
+<div class="flex justify-between items-center">
+<span class="text-label-sm text-outline uppercase tracking-wider font-semibold">Available GBP</span>
+<span class="text-on-surface-variant text-label-sm font-medium">--</span>
+</div>
+<div class="flex items-baseline gap-2">
+<span class="font-number-lg text-number-lg tabular-nums">3,942.00</span>
+<span class="text-label-sm text-outline">GBP</span>
+</div>
+</div>
+<!-- Pending Settlement -->
+<div class="bg-surface-container-lowest border border-outline-variant p-stack-md rounded-xl space-y-2">
+<div class="flex justify-between items-center">
+<span class="text-label-sm text-outline uppercase tracking-wider font-semibold">Pending Settlement</span>
+<span class="material-symbols-outlined text-primary text-sm">schedule</span>
+</div>
+<div class="flex items-baseline gap-2">
+<span class="font-number-lg text-number-lg tabular-nums">8,204.15</span>
+<span class="text-label-sm text-outline">USD</span>
+</div>
+</div>
+</section>
+<!-- Two-Column Grid -->
+<section class="grid grid-cols-1 lg:grid-cols-12 gap-stack-lg">
+<!-- Fee Schedule (Left - 5 Cols) -->
+<div class="lg:col-span-5 bg-surface-container-lowest border border-outline-variant rounded-xl overflow-hidden flex flex-col">
+<div class="p-stack-md border-b border-outline-variant flex justify-between items-center bg-surface-bright">
+<h3 class="font-headline-sm text-headline-sm">Fee schedule</h3>
+<button class="text-primary font-semibold text-label-md hover:underline flex items-center gap-1">
+<span class="material-symbols-outlined text-lg">edit</span>
+                            Edit fees
+                        </button>
+</div>
+<div class="p-stack-md flex-1 space-y-stack-md">
+<div class="space-y-4">
+<div class="flex justify-between items-center pb-2 border-b border-surface-container">
+<span class="text-on-surface-variant font-body-md">MDR (Interchange)</span>
+<span class="font-number-md tabular-nums">1.85%</span>
+</div>
+<div class="flex justify-between items-center pb-2 border-b border-surface-container">
+<span class="text-on-surface-variant font-body-md">Scheme Fee</span>
+<span class="font-number-md tabular-nums">0.35%</span>
+</div>
+<div class="flex justify-between items-center pb-2 border-b border-surface-container">
+<span class="text-on-surface-variant font-body-md">Gateway Fee</span>
+<span class="font-number-md tabular-nums">0.15 USD / txn</span>
+</div>
+<div class="flex justify-between items-center pb-2 border-b border-surface-container">
+<span class="text-on-surface-variant font-body-md">Rolling Reserve</span>
+<div class="text-right">
+<span class="font-number-md tabular-nums block">10.00%</span>
+<span class="text-label-sm text-outline">180 day hold</span>
+</div>
+</div>
+<div class="flex justify-between items-center pb-2 border-b border-surface-container">
+<span class="text-on-surface-variant font-body-md">Settlement Fee</span>
+<span class="font-number-md tabular-nums">25.00 USD</span>
+</div>
+<div class="flex justify-between items-center">
+<span class="text-on-surface-variant font-body-md">Chargeback Fee</span>
+<span class="font-number-md tabular-nums">35.00 USD</span>
+</div>
+</div>
+<div class="mt-4 p-stack-sm bg-surface-container rounded-lg border border-outline-variant">
+<div class="flex gap-3">
+<span class="material-symbols-outlined text-primary">info</span>
+<p class="text-label-sm text-on-surface-variant">Fees are calculated at the end of each processing day and deducted before settlement.</p>
+</div>
+</div>
+</div>
+</div>
+<!-- Reserve Statement (Right - 7 Cols) -->
+<div class="lg:col-span-7 bg-surface-container-lowest border border-outline-variant rounded-xl overflow-hidden">
+<div class="p-stack-md border-b border-outline-variant flex justify-between items-center bg-surface-bright">
+<h3 class="font-headline-sm text-headline-sm">Reserve statement</h3>
+<span class="text-label-sm text-outline">Last 30 Days</span>
+</div>
+<div class="overflow-x-auto">
+<table class="w-full text-left">
+<thead>
+<tr class="bg-surface-container-low border-b border-outline-variant">
+<th class="px-4 py-3 uppercase text-label-sm text-outline font-semibold">Release Date</th>
+<th class="px-4 py-3 uppercase text-label-sm text-outline font-semibold">Reserve Type</th>
+<th class="px-4 py-3 uppercase text-label-sm text-outline font-semibold">Status</th>
+<th class="px-4 py-3 uppercase text-label-sm text-outline font-semibold text-right">Amount</th>
+</tr>
+</thead>
+<tbody class="divide-y divide-surface-container">
+<tr class="hover:bg-surface transition-colors h-[52px]">
+<td class="px-4 py-3 font-body-md tabular-nums text-on-surface">Oct 24, 2023</td>
+<td class="px-4 py-3 font-body-md text-on-surface-variant">Rolling (180d)</td>
+<td class="px-4 py-3">
+<span class="inline-flex items-center gap-1.5 text-label-sm font-medium text-orange-600 bg-orange-50 px-2 py-0.5 rounded-full">
+<span class="w-1.5 h-1.5 rounded-full bg-orange-600"></span>
+                                            Locked
+                                        </span>
+</td>
+<td class="px-4 py-3 text-right">
+<span class="font-number-md tabular-nums">4,203.10</span>
+<span class="text-label-sm text-outline ml-1">USD</span>
+</td>
+</tr>
+<tr class="hover:bg-surface transition-colors h-[52px]">
+<td class="px-4 py-3 font-body-md tabular-nums text-on-surface">Sep 28, 2023</td>
+<td class="px-4 py-3 font-body-md text-on-surface-variant">Rolling (180d)</td>
+<td class="px-4 py-3">
+<span class="inline-flex items-center gap-1.5 text-label-sm font-medium text-green-600 bg-green-50 px-2 py-0.5 rounded-full">
+<span class="w-1.5 h-1.5 rounded-full bg-green-600"></span>
+                                            Released
+                                        </span>
+</td>
+<td class="px-4 py-3 text-right">
+<span class="font-number-md tabular-nums">3,115.50</span>
+<span class="text-label-sm text-outline ml-1">USD</span>
+</td>
+</tr>
+<tr class="hover:bg-surface transition-colors h-[52px]">
+<td class="px-4 py-3 font-body-md tabular-nums text-on-surface">Aug 15, 2023</td>
+<td class="px-4 py-3 font-body-md text-on-surface-variant">Manual Hold</td>
+<td class="px-4 py-3">
+<span class="inline-flex items-center gap-1.5 text-label-sm font-medium text-error bg-error-container px-2 py-0.5 rounded-full">
+<span class="w-1.5 h-1.5 rounded-full bg-error"></span>
+                                            Dispute
+                                        </span>
+</td>
+<td class="px-4 py-3 text-right">
+<span class="font-number-md tabular-nums">1,200.00</span>
+<span class="text-label-sm text-outline ml-1">USD</span>
+</td>
+</tr>
+<tr class="hover:bg-surface transition-colors h-[52px]">
+<td class="px-4 py-3 font-body-md tabular-nums text-on-surface">Jul 02, 2023</td>
+<td class="px-4 py-3 font-body-md text-on-surface-variant">Rolling (180d)</td>
+<td class="px-4 py-3">
+<span class="inline-flex items-center gap-1.5 text-label-sm font-medium text-green-600 bg-green-50 px-2 py-0.5 rounded-full">
+<span class="w-1.5 h-1.5 rounded-full bg-green-600"></span>
+                                            Released
+                                        </span>
+</td>
+<td class="px-4 py-3 text-right">
+<span class="font-number-md tabular-nums">2,880.00</span>
+<span class="text-label-sm text-outline ml-1">USD</span>
+</td>
+</tr>
+</tbody>
+</table>
+</div>
+</div>
+</section>
+<!-- Settlements History (Full Width) -->
+<section class="bg-surface-container-lowest border border-outline-variant rounded-xl overflow-hidden">
+<div class="p-stack-md border-b border-outline-variant flex justify-between items-center bg-surface-bright">
+<h3 class="font-headline-sm text-headline-sm">Settlements</h3>
+<div class="flex items-center gap-gutter">
+<button class="text-label-md font-semibold text-outline hover:text-primary transition-colors flex items-center gap-1">
+<span class="material-symbols-outlined text-lg">filter_alt</span>
+                            Filter
+                        </button>
+<button class="text-label-md font-semibold text-outline hover:text-primary transition-colors flex items-center gap-1">
+<span class="material-symbols-outlined text-lg">download</span>
+                            Export CSV
+                        </button>
+</div>
+</div>
+<div class="overflow-x-auto">
+<table class="w-full text-left">
+<thead>
+<tr class="bg-surface-container-low border-b border-outline-variant">
+<th class="px-container-padding py-3 uppercase text-label-sm text-outline font-semibold">Settlement ID</th>
+<th class="px-4 py-3 uppercase text-label-sm text-outline font-semibold">Processor</th>
+<th class="px-4 py-3 uppercase text-label-sm text-outline font-semibold">Status</th>
+<th class="px-4 py-3 uppercase text-label-sm text-outline font-semibold">Date</th>
+<th class="px-4 py-3 uppercase text-label-sm text-outline font-semibold text-right">Net Amount</th>
+<th class="px-container-padding py-3 uppercase text-label-sm text-outline font-semibold text-right">Actions</th>
+</tr>
+</thead>
+<tbody class="divide-y divide-surface-container">
+<!-- Row 1 -->
+<tr class="hover:bg-surface transition-colors h-[52px]">
+<td class="px-container-padding py-3 font-body-md text-primary font-medium">STL-20231025-001</td>
+<td class="px-4 py-3 font-body-md text-on-surface-variant">JP Morgan (ACH)</td>
+<td class="px-4 py-3">
+<span class="inline-flex items-center gap-1.5 text-label-sm font-medium text-green-600 bg-green-50 px-2.5 py-1 rounded-full border border-green-200">
+<span class="w-1.5 h-1.5 rounded-full bg-green-600"></span>
+                                        Completed
+                                    </span>
+</td>
+<td class="px-4 py-3 font-body-md tabular-nums text-on-surface-variant">Oct 25, 2023, 08:30 AM</td>
+<td class="px-4 py-3 text-right">
+<span class="font-number-md tabular-nums text-on-surface">14,250.00</span>
+<span class="text-label-sm text-outline ml-1">USD</span>
+</td>
+<td class="px-container-padding py-3 text-right">
+<button class="text-outline hover:text-primary transition-colors">
+<span class="material-symbols-outlined text-xl">description</span>
+</button>
+</td>
+</tr>
+<!-- Row 2 -->
+<tr class="hover:bg-surface transition-colors h-[52px]">
+<td class="px-container-padding py-3 font-body-md text-primary font-medium">STL-20231024-042</td>
+<td class="px-4 py-3 font-body-md text-on-surface-variant">Wise (SWIFT)</td>
+<td class="px-4 py-3">
+<span class="inline-flex items-center gap-1.5 text-label-sm font-medium text-primary bg-primary-fixed px-2.5 py-1 rounded-full border border-primary-container">
+<span class="w-1.5 h-1.5 rounded-full bg-primary"></span>
+                                        In Transit
+                                    </span>
+</td>
+<td class="px-4 py-3 font-body-md tabular-nums text-on-surface-variant">Oct 24, 2023, 11:15 AM</td>
+<td class="px-4 py-3 text-right">
+<span class="font-number-md tabular-nums text-on-surface">8,920.40</span>
+<span class="text-label-sm text-outline ml-1">EUR</span>
+</td>
+<td class="px-container-padding py-3 text-right">
+<button class="text-outline hover:text-primary transition-colors">
+<span class="material-symbols-outlined text-xl">description</span>
+</button>
+</td>
+</tr>
+<!-- Row 3 -->
+<tr class="hover:bg-surface transition-colors h-[52px]">
+<td class="px-container-padding py-3 font-body-md text-primary font-medium">STL-20231023-019</td>
+<td class="px-4 py-3 font-body-md text-on-surface-variant">Citibank (Wire)</td>
+<td class="px-4 py-3">
+<span class="inline-flex items-center gap-1.5 text-label-sm font-medium text-green-600 bg-green-50 px-2.5 py-1 rounded-full border border-green-200">
+<span class="w-1.5 h-1.5 rounded-full bg-green-600"></span>
+                                        Completed
+                                    </span>
+</td>
+<td class="px-4 py-3 font-body-md tabular-nums text-on-surface-variant">Oct 23, 2023, 09:00 AM</td>
+<td class="px-4 py-3 text-right">
+<span class="font-number-md tabular-nums text-on-surface">22,100.15</span>
+<span class="text-label-sm text-outline ml-1">USD</span>
+</td>
+<td class="px-container-padding py-3 text-right">
+<button class="text-outline hover:text-primary transition-colors">
+<span class="material-symbols-outlined text-xl">description</span>
+</button>
+</td>
+</tr>
+<!-- Row 4 -->
+<tr class="hover:bg-surface transition-colors h-[52px]">
+<td class="px-container-padding py-3 font-body-md text-primary font-medium">STL-20231021-088</td>
+<td class="px-4 py-3 font-body-md text-on-surface-variant">JP Morgan (ACH)</td>
+<td class="px-4 py-3">
+<span class="inline-flex items-center gap-1.5 text-label-sm font-medium text-error bg-error-container px-2.5 py-1 rounded-full border border-error">
+<span class="w-1.5 h-1.5 rounded-full bg-error"></span>
+                                        Failed
+                                    </span>
+</td>
+<td class="px-4 py-3 font-body-md tabular-nums text-on-surface-variant">Oct 21, 2023, 02:45 PM</td>
+<td class="px-4 py-3 text-right">
+<span class="font-number-md tabular-nums text-on-surface">1,050.00</span>
+<span class="text-label-sm text-outline ml-1">USD</span>
+</td>
+<td class="px-container-padding py-3 text-right">
+<button class="text-outline hover:text-primary transition-colors">
+<span class="material-symbols-outlined text-xl">refresh</span>
+</button>
+</td>
+</tr>
+</tbody>
+</table>
+</div>
+<div class="p-stack-md flex justify-between items-center bg-surface-bright border-t border-outline-variant">
+<span class="text-label-sm text-outline">Showing 4 of 128 settlements</span>
+<div class="flex gap-2">
+<button class="p-1 rounded hover:bg-surface-container-high transition-colors text-outline">
+<span class="material-symbols-outlined">chevron_left</span>
+</button>
+<button class="p-1 rounded hover:bg-surface-container-high transition-colors text-on-surface font-semibold text-label-sm border border-outline-variant px-2">1</button>
+<button class="p-1 rounded hover:bg-surface-container-high transition-colors text-outline font-medium text-label-sm px-2">2</button>
+<button class="p-1 rounded hover:bg-surface-container-high transition-colors text-outline font-medium text-label-sm px-2">3</button>
+<button class="p-1 rounded hover:bg-surface-container-high transition-colors text-outline">
+<span class="material-symbols-outlined">chevron_right</span>
+</button>
+</div>
+</div>
+</section>
+</div>
+</main>
+<script>
+        // Simple interactivity for numbers animation
+        document.addEventListener('DOMContentLoaded', () => {
+            const numbers = document.querySelectorAll('.tabular-nums');
+            numbers.forEach(num => {
+                num.addEventListener('mouseenter', () => {
+                    num.classList.add('text-primary');
+                });
+                num.addEventListener('mouseleave', () => {
+                    num.classList.remove('text-primary');
+                });
+            });
+        });
+    </script>
+</body></html>

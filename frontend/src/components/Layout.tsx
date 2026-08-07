@@ -96,9 +96,9 @@ export default function Layout() {
     <div className="shell">
       <aside className="sidebar">
         <div className="sidebar-logo">
-          <div className="mark">TW</div>
+          <div className="mark">CS</div>
           <div>
-            <div className="name">TransactWorld</div>
+            <div className="name">CoreServices</div>
             <div className="sub">Settlement &amp; Ledger</div>
           </div>
         </div>
@@ -152,7 +152,7 @@ export default function Layout() {
         </main>
 
         <footer className="app-footer internal-only">
-          Internal use only · TransactWorld Settlement &amp; Ledger · data for demonstration
+          Internal use only · CoreServices Settlement &amp; Ledger · data for demonstration
         </footer>
       </div>
 

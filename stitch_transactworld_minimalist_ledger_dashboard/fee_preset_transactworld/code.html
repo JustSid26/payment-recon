@@ -1,0 +1,383 @@
+<!DOCTYPE html>
+
+<html class="light" lang="en"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>TransactWorld | Fee Schedule</title>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<script id="tailwind-config">
+      tailwind.config = {
+        darkMode: "class",
+        theme: {
+          extend: {
+            "colors": {
+                    "on-secondary": "#ffffff",
+                    "surface-bright": "#faf8ff",
+                    "on-primary": "#ffffff",
+                    "background": "#faf8ff",
+                    "outline": "#747686",
+                    "on-secondary-fixed-variant": "#3e4755",
+                    "surface-container-low": "#f3f2fe",
+                    "surface-tint": "#2151da",
+                    "on-primary-fixed-variant": "#0039b5",
+                    "error": "#ba1a1a",
+                    "on-secondary-fixed": "#121c28",
+                    "on-primary-container": "#cad3ff",
+                    "primary-container": "#1d4ed8",
+                    "tertiary-fixed-dim": "#ffb59c",
+                    "tertiary-container": "#a73400",
+                    "on-tertiary-container": "#ffc9b7",
+                    "on-secondary-container": "#596372",
+                    "surface-container": "#ededf9",
+                    "surface-container-high": "#e8e7f3",
+                    "on-surface": "#1a1b23",
+                    "secondary": "#555f6d",
+                    "surface-container-highest": "#e2e1ed",
+                    "on-error-container": "#93000a",
+                    "surface-dim": "#d9d9e5",
+                    "on-tertiary-fixed-variant": "#832700",
+                    "on-primary-fixed": "#001551",
+                    "secondary-fixed": "#d9e3f4",
+                    "outline-variant": "#c4c5d7",
+                    "primary-fixed-dim": "#b7c4ff",
+                    "inverse-on-surface": "#f0f0fb",
+                    "tertiary-fixed": "#ffdbcf",
+                    "surface-variant": "#e2e1ed",
+                    "primary": "#0037b0",
+                    "on-surface-variant": "#434655",
+                    "error-container": "#ffdad6",
+                    "inverse-primary": "#b7c4ff",
+                    "inverse-surface": "#2e3039",
+                    "on-error": "#ffffff",
+                    "secondary-fixed-dim": "#bdc7d8",
+                    "surface-container-lowest": "#ffffff",
+                    "on-tertiary-fixed": "#390c00",
+                    "surface": "#faf8ff",
+                    "primary-fixed": "#dce1ff",
+                    "on-background": "#1a1b23",
+                    "tertiary": "#7f2500",
+                    "secondary-container": "#d6e0f1",
+                    "on-tertiary": "#ffffff"
+            },
+            "borderRadius": {
+                    "DEFAULT": "0.25rem",
+                    "lg": "0.5rem",
+                    "xl": "0.75rem",
+                    "full": "9999px"
+            },
+            "spacing": {
+                    "container-padding": "24px",
+                    "stack-lg": "32px",
+                    "stack-md": "16px",
+                    "stack-sm": "8px",
+                    "gutter": "16px",
+                    "base": "4px"
+            },
+            "fontFamily": {
+                    "body-lg": ["Inter"],
+                    "headline-lg": ["Inter"],
+                    "headline-sm": ["Inter"],
+                    "headline-md": ["Inter"],
+                    "label-md": ["Inter"],
+                    "number-lg": ["Inter"],
+                    "number-md": ["Inter"],
+                    "body-md": ["Inter"],
+                    "label-sm": ["Inter"]
+            },
+            "fontSize": {
+                    "body-lg": ["16px", {"lineHeight": "24px", "fontWeight": "400"}],
+                    "headline-lg": ["30px", {"lineHeight": "38px", "letterSpacing": "-0.02em", "fontWeight": "600"}],
+                    "headline-sm": ["18px", {"lineHeight": "28px", "fontWeight": "600"}],
+                    "headline-md": ["24px", {"lineHeight": "32px", "letterSpacing": "-0.02em", "fontWeight": "600"}],
+                    "label-md": ["13px", {"lineHeight": "18px", "letterSpacing": "0.01em", "fontWeight": "500"}],
+                    "number-lg": ["24px", {"lineHeight": "32px", "fontWeight": "600"}],
+                    "number-md": ["14px", {"lineHeight": "20px", "fontWeight": "500"}],
+                    "body-md": ["14px", {"lineHeight": "20px", "fontWeight": "400"}],
+                    "label-sm": ["12px", {"lineHeight": "16px", "fontWeight": "500"}]
+            }
+          },
+        },
+      }
+    </script>
+<style>
+        body { font-family: 'Inter', sans-serif; }
+        .material-symbols-outlined {
+            font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24;
+        }
+        /* Custom input rounding for 10px as per prompt */
+        .input-round { border-radius: 10px; }
+        .modal-round { border-radius: 16px; }
+    </style>
+</head>
+<body class="bg-background text-on-surface antialiased overflow-hidden">
+<!-- Global Layout Shell -->
+<div class="flex min-h-screen">
+<!-- SideNavBar (from JSON) -->
+<aside class="fixed left-0 top-0 h-screen flex flex-col py-stack-lg bg-surface border-r border-outline-variant w-64 z-10">
+<div class="px-6 mb-10">
+<div class="font-headline-sm text-headline-sm font-semibold text-primary">TransactWorld</div>
+<div class="font-body-md text-body-md text-on-surface-variant">Merchant Portal</div>
+</div>
+<nav class="flex-1 px-4 space-y-1">
+<!-- Dashboard -->
+<a class="flex items-center gap-3 px-3 py-2 font-body-md text-body-md text-on-surface-variant hover:bg-surface-container transition-colors rounded-lg" href="#">
+<span class="material-symbols-outlined">dashboard</span>
+                    Dashboard
+                </a>
+<!-- Merchants (Active) -->
+<a class="flex items-center gap-3 px-3 py-2 font-body-md text-body-md text-primary font-bold border-r-2 border-primary bg-surface-container-low transition-colors" href="#">
+<span class="material-symbols-outlined" style="font-variation-settings: 'FILL' 1;">storefront</span>
+                    Merchants
+                </a>
+<a class="flex items-center gap-3 px-3 py-2 font-body-md text-body-md text-on-surface-variant hover:bg-surface-container transition-colors rounded-lg" href="#">
+<span class="material-symbols-outlined">receipt_long</span>
+                    Transactions
+                </a>
+<a class="flex items-center gap-3 px-3 py-2 font-body-md text-body-md text-on-surface-variant hover:bg-surface-container transition-colors rounded-lg" href="#">
+<span class="material-symbols-outlined">payments</span>
+                    Settlements
+                </a>
+<a class="flex items-center gap-3 px-3 py-2 font-body-md text-body-md text-on-surface-variant hover:bg-surface-container transition-colors rounded-lg" href="#">
+<span class="material-symbols-outlined">account_balance_wallet</span>
+                    Ledger
+                </a>
+<a class="flex items-center gap-3 px-3 py-2 font-body-md text-body-md text-on-surface-variant hover:bg-surface-container transition-colors rounded-lg" href="#">
+<span class="material-symbols-outlined">verified_user</span>
+                    Integrity
+                </a>
+</nav>
+<div class="px-4 mt-auto border-t border-outline-variant pt-stack-md space-y-1">
+<a class="flex items-center gap-3 px-3 py-2 font-body-md text-body-md text-on-surface-variant hover:bg-surface-container transition-colors rounded-lg" href="#">
+<span class="material-symbols-outlined">settings</span>
+                    Profile Settings
+                </a>
+<a class="flex items-center gap-3 px-3 py-2 font-body-md text-body-md text-on-surface-variant hover:bg-surface-container transition-colors rounded-lg" href="#">
+<span class="material-symbols-outlined">logout</span>
+                    Logout
+                </a>
+</div>
+</aside>
+<!-- Main Content (Background for the Modal) -->
+<main class="ml-64 flex-1 flex flex-col min-h-screen">
+<!-- TopNavBar (from JSON) -->
+<header class="flex justify-between items-center h-16 px-container-padding bg-background border-b border-outline-variant">
+<div class="font-headline-md text-headline-md text-primary">Merchants</div>
+<div class="flex items-center gap-6">
+<div class="relative group">
+<span class="absolute inset-y-0 left-3 flex items-center text-outline">
+<span class="material-symbols-outlined">search</span>
+</span>
+<input class="pl-10 pr-4 py-2 bg-surface-container-low border-none input-round w-64 focus:ring-1 focus:ring-primary text-body-md" placeholder="Search merchants..." type="text"/>
+</div>
+<div class="flex items-center gap-4 text-on-surface-variant">
+<span class="text-label-md font-label-md uppercase tracking-wider text-outline">System Status</span>
+<button class="hover:text-primary transition-colors"><span class="material-symbols-outlined">notifications</span></button>
+<button class="hover:text-primary transition-colors"><span class="material-symbols-outlined">help_outline</span></button>
+</div>
+</div>
+</header>
+<!-- Table Content (Mocked background) -->
+<div class="p-container-padding flex-1">
+<div class="bg-surface-container-lowest border border-outline-variant modal-round overflow-hidden">
+<table class="w-full text-left">
+<thead>
+<tr class="border-b border-outline-variant">
+<th class="px-gutter py-4 font-label-sm text-label-sm text-outline uppercase tracking-wider">Merchant Name</th>
+<th class="px-gutter py-4 font-label-sm text-label-sm text-outline uppercase tracking-wider">Region</th>
+<th class="px-gutter py-4 font-label-sm text-label-sm text-outline uppercase tracking-wider">MDR %</th>
+<th class="px-gutter py-4 font-label-sm text-label-sm text-outline uppercase tracking-wider text-right">Volume (30d)</th>
+<th class="px-gutter py-4 font-label-sm text-label-sm text-outline uppercase tracking-wider text-right">Action</th>
+</tr>
+</thead>
+<tbody class="divide-y divide-outline-variant">
+<tr class="hover:bg-surface-bright transition-colors">
+<td class="px-gutter py-5 font-body-md text-body-md font-medium">Skyline Global Ltd.</td>
+<td class="px-gutter py-5 font-body-md text-body-md">EU / SEPA</td>
+<td class="px-gutter py-5 font-body-md text-body-md">2.45%</td>
+<td class="px-gutter py-5 font-number-md text-number-md text-right font-medium">€142,500.00</td>
+<td class="px-gutter py-5 text-right"><button class="text-primary hover:underline font-label-md">Edit Fees</button></td>
+</tr>
+<tr class="hover:bg-surface-bright transition-colors">
+<td class="px-gutter py-5 font-body-md text-body-md font-medium">Oceanic E-com</td>
+<td class="px-gutter py-5 font-body-md text-body-md">US / ACH</td>
+<td class="px-gutter py-5 font-body-md text-body-md">2.10%</td>
+<td class="px-gutter py-5 font-number-md text-number-md text-right font-medium">$89,200.00</td>
+<td class="px-gutter py-5 text-right"><button class="text-primary hover:underline font-label-md">Edit Fees</button></td>
+</tr>
+</tbody>
+</table>
+</div>
+</div>
+</main>
+</div>
+<!-- Modal Overlay -->
+<div class="fixed inset-0 z-50 flex items-center justify-center p-4">
+<!-- Backdrop -->
+<div class="absolute inset-0 bg-inverse-surface/40 backdrop-blur-sm"></div>
+<!-- Modal Card -->
+<div class="relative w-full max-w-2xl bg-surface-container-lowest border border-outline-variant modal-round shadow-2xl overflow-hidden flex flex-col">
+<!-- Header -->
+<div class="px-container-padding py-stack-md border-b border-outline-variant flex justify-between items-center bg-surface-container-lowest">
+<div>
+<h2 class="font-headline-sm text-headline-sm text-on-surface">Fee Schedule</h2>
+<p class="text-body-md text-on-surface-variant">Define processing rates and settlement terms.</p>
+</div>
+<button class="text-outline hover:text-on-surface transition-colors p-2 rounded-full hover:bg-surface-container">
+<span class="material-symbols-outlined">close</span>
+</button>
+</div>
+<!-- Content Area -->
+<div class="p-container-padding overflow-y-auto max-h-[716px] space-y-stack-lg">
+<!-- Preset Dropdown -->
+<div class="space-y-stack-sm">
+<label class="block font-label-md text-label-md text-on-surface-variant">Load Preset Configuration</label>
+<div class="relative">
+<select class="w-full appearance-none bg-surface-container-low border border-outline-variant input-round px-4 py-3 text-body-md focus:ring-2 focus:ring-primary focus:border-primary transition-all pr-10">
+<option>Standard High-Risk Merchant (EU)</option>
+<option>Low-Risk E-commerce (Global)</option>
+<option>Gaming &amp; Entertainment Tier 1</option>
+<option>Subscription SaaS Special</option>
+<option value="custom">Custom Configuration...</option>
+</select>
+<span class="absolute right-4 top-1/2 -translate-y-1/2 pointer-events-none text-outline">
+<span class="material-symbols-outlined">expand_more</span>
+</span>
+</div>
+</div>
+<!-- Grid of Fields -->
+<div class="grid grid-cols-2 gap-x-gutter gap-y-stack-md">
+<!-- MDR -->
+<div class="space-y-stack-sm">
+<label class="block font-label-md text-label-md text-on-surface-variant">MDR (%)</label>
+<div class="relative">
+<input class="w-full bg-surface-container-lowest border border-outline-variant input-round px-4 py-2.5 font-number-md text-number-md focus:ring-2 focus:ring-primary transition-all" step="0.01" type="number" value="2.45"/>
+<span class="absolute right-4 top-1/2 -translate-y-1/2 text-outline text-label-sm font-medium">PCT</span>
+</div>
+</div>
+<!-- Settlement Fee -->
+<div class="space-y-stack-sm">
+<label class="block font-label-md text-label-md text-on-surface-variant">Settlement Fee (%)</label>
+<div class="relative">
+<input class="w-full bg-surface-container-lowest border border-outline-variant input-round px-4 py-2.5 font-number-md text-number-md focus:ring-2 focus:ring-primary transition-all" step="0.01" type="number" value="0.10"/>
+<span class="absolute right-4 top-1/2 -translate-y-1/2 text-outline text-label-sm font-medium">PCT</span>
+</div>
+</div>
+<!-- Rolling Reserve -->
+<div class="space-y-stack-sm">
+<label class="block font-label-md text-label-md text-on-surface-variant">Rolling Reserve (%)</label>
+<div class="relative">
+<input class="w-full bg-surface-container-lowest border border-outline-variant input-round px-4 py-2.5 font-number-md text-number-md focus:ring-2 focus:ring-primary transition-all" step="1" type="number" value="10"/>
+<span class="absolute right-4 top-1/2 -translate-y-1/2 text-outline text-label-sm font-medium">PCT</span>
+</div>
+</div>
+<!-- Reserve Hold Days -->
+<div class="space-y-stack-sm">
+<label class="block font-label-md text-label-md text-on-surface-variant">Reserve Hold Days</label>
+<div class="relative">
+<input class="w-full bg-surface-container-lowest border border-outline-variant input-round px-4 py-2.5 font-number-md text-number-md focus:ring-2 focus:ring-primary transition-all" type="number" value="180"/>
+<span class="absolute right-4 top-1/2 -translate-y-1/2 text-outline text-label-sm font-medium">DAYS</span>
+</div>
+</div>
+<!-- Approved Fee -->
+<div class="space-y-stack-sm">
+<label class="block font-label-md text-label-md text-on-surface-variant">Approved Txn Fee</label>
+<div class="relative">
+<input class="w-full bg-surface-container-lowest border border-outline-variant input-round px-4 py-2.5 font-number-md text-number-md focus:ring-2 focus:ring-primary transition-all" step="0.01" type="number" value="0.25"/>
+<span class="absolute right-4 top-1/2 -translate-y-1/2 text-outline text-label-sm font-medium">EUR</span>
+</div>
+</div>
+<!-- Declined Fee -->
+<div class="space-y-stack-sm">
+<label class="block font-label-md text-label-md text-on-surface-variant">Declined Txn Fee</label>
+<div class="relative">
+<input class="w-full bg-surface-container-lowest border border-outline-variant input-round px-4 py-2.5 font-number-md text-number-md focus:ring-2 focus:ring-primary transition-all" step="0.01" type="number" value="0.10"/>
+<span class="absolute right-4 top-1/2 -translate-y-1/2 text-outline text-label-sm font-medium">EUR</span>
+</div>
+</div>
+<!-- Refund Fee -->
+<div class="space-y-stack-sm">
+<label class="block font-label-md text-label-md text-on-surface-variant">Refund Fee</label>
+<div class="relative">
+<input class="w-full bg-surface-container-lowest border border-outline-variant input-round px-4 py-2.5 font-number-md text-number-md focus:ring-2 focus:ring-primary transition-all" step="0.01" type="number" value="1.00"/>
+<span class="absolute right-4 top-1/2 -translate-y-1/2 text-outline text-label-sm font-medium">EUR</span>
+</div>
+</div>
+<!-- Chargeback Fee -->
+<div class="space-y-stack-sm">
+<label class="block font-label-md text-label-md text-on-surface-variant">Chargeback Fee</label>
+<div class="relative">
+<input class="w-full bg-surface-container-lowest border border-outline-variant input-round px-4 py-2.5 font-number-md text-number-md focus:ring-2 focus:ring-primary transition-all" step="1" type="number" value="25"/>
+<span class="absolute right-4 top-1/2 -translate-y-1/2 text-outline text-label-sm font-medium">EUR</span>
+</div>
+</div>
+<!-- Settlement Delay -->
+<div class="col-span-2 space-y-stack-sm">
+<label class="block font-label-md text-label-md text-on-surface-variant">Settlement Delay</label>
+<div class="flex gap-4">
+<div class="flex-1 relative">
+<input class="w-full bg-surface-container-lowest border border-outline-variant input-round px-4 py-2.5 font-number-md text-number-md focus:ring-2 focus:ring-primary transition-all" type="number" value="7"/>
+<span class="absolute right-4 top-1/2 -translate-y-1/2 text-outline text-label-sm font-medium">DAYS</span>
+</div>
+<div class="flex items-center gap-2 px-4 bg-surface-container-high rounded-full">
+<div class="w-2 h-2 rounded-full bg-primary"></div>
+<span class="text-label-sm font-medium text-on-surface">T + 7 Schedule</span>
+</div>
+</div>
+</div>
+</div>
+<!-- Subtle Tonal Note -->
+<div class="bg-surface-container p-4 input-round border border-outline-variant flex gap-3">
+<span class="material-symbols-outlined text-primary">info</span>
+<p class="text-body-md text-on-surface-variant">
+                        Changes to the fee schedule will be applied to the next billing cycle starting <span class="font-medium text-on-surface">October 1st, 2023</span>. This will notify the merchant via email.
+                    </p>
+</div>
+</div>
+<!-- Footer -->
+<div class="px-container-padding py-5 bg-surface-container-lowest border-t border-outline-variant flex items-center justify-between">
+<button class="text-secondary font-label-md hover:bg-surface-container-low px-4 py-2 rounded-lg transition-colors">
+                    Clear all
+                </button>
+<div class="flex gap-stack-sm">
+<button class="px-6 py-2 border border-outline-variant text-on-surface-variant font-label-md input-round hover:bg-surface-container transition-all active:scale-95">
+                        Cancel
+                    </button>
+<button class="px-8 py-2 bg-primary-container text-white font-label-md input-round hover:bg-primary transition-all shadow-sm active:scale-95">
+                        Save Schedule
+                    </button>
+</div>
+</div>
+</div>
+</div>
+<!-- Background Elements/Micro-interactions -->
+<script>
+        // Simple logic for the preset dropdown interaction
+        const select = document.querySelector('select');
+        const inputs = document.querySelectorAll('input');
+
+        select.addEventListener('change', (e) => {
+            if(e.target.value === 'Low-Risk E-commerce (Global)') {
+                inputs[0].value = 1.90; // MDR
+                inputs[1].value = 0.05; // Settlement
+                inputs[2].value = 5;    // Reserve
+                inputs[3].value = 90;   // Hold
+                inputs[4].value = 0.20; // Approved
+                inputs[5].value = 0.05; // Declined
+                inputs[8].value = 3;    // Delay
+            }
+        });
+
+        // Focus ring styling for inputs
+        inputs.forEach(input => {
+            input.addEventListener('focus', () => {
+                input.parentElement.classList.add('ring-offset-2');
+            });
+            input.addEventListener('blur', () => {
+                input.parentElement.classList.remove('ring-offset-2');
+            });
+        });
+    </script>
+</body></html>

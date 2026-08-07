@@ -347,7 +347,7 @@ def build(conn: psycopg.Connection, settlement_id: int) -> dict | None:
         <td style="padding:8px 12px;text-align:right;font-weight:700;background:#f0fdf4">{net} {ccy}</td></tr>
   </table>
   <p style="color:#94a3b8;font-size:12px;margin-top:20px">
-    Automated payout confirmation from TransactWorld. Quote confirmation code
+    Automated payout confirmation from CoreServices. Quote confirmation code
     <b>{_html.escape(code)}</b> for any query about this settlement. Attached: the full settlement
     <b>report (PDF)</b> and the <b>{len(items)} transactions (Excel)</b>.
   </p>
@@ -455,7 +455,7 @@ def build_day(conn: psycopg.Connection, settlement_id: int, day: str) -> dict | 
         <td style="padding:8px 12px;text-align:right;font-weight:700;background:#f0fdf4">{net_str} {ccy}</td></tr>
   </table>
   <p style="color:#94a3b8;font-size:12px;margin-top:20px">
-    Automated payout confirmation from TransactWorld for <b>{day}</b>. Quote confirmation code
+    Automated payout confirmation from CoreServices for <b>{day}</b>. Quote confirmation code
     <b>{_html.escape(code)}</b> for any query. Attached: the day <b>report (PDF)</b> and its
     <b>{len(items)} transactions (Excel)</b>.
   </p>

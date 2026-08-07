@@ -1,0 +1,524 @@
+<!DOCTYPE html>
+
+<html class="light" lang="en"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>TransactWorld | Merchant Portal Dashboard</title>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@100..900&display=swap" rel="stylesheet"/>
+<style>
+        .material-symbols-outlined {
+            font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24;
+            vertical-align: middle;
+        }
+        [data-weight="fill"] {
+            font-variation-settings: 'FILL' 1;
+        }
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: #f8fafc;
+        }
+        .tabular-nums {
+            font-variant-numeric: tabular-nums;
+        }
+        /* Custom scrollbar for clean UI */
+        ::-webkit-scrollbar {
+            width: 6px;
+        }
+        ::-webkit-scrollbar-track {
+            background: transparent;
+        }
+        ::-webkit-scrollbar-thumb {
+            background: #e2e1ed;
+            border-radius: 10px;
+        }
+        ::-webkit-scrollbar-thumb:hover {
+            background: #c4c5d7;
+        }
+    </style>
+<script id="tailwind-config">
+        tailwind.config = {
+          darkMode: "class",
+          theme: {
+            extend: {
+              "colors": {
+                      "on-secondary": "#ffffff",
+                      "surface-bright": "#faf8ff",
+                      "on-primary": "#ffffff",
+                      "background": "#faf8ff",
+                      "outline": "#747686",
+                      "on-secondary-fixed-variant": "#3e4755",
+                      "surface-container-low": "#f3f2fe",
+                      "surface-tint": "#2151da",
+                      "on-primary-fixed-variant": "#0039b5",
+                      "error": "#ba1a1a",
+                      "on-secondary-fixed": "#121c28",
+                      "on-primary-container": "#cad3ff",
+                      "primary-container": "#1d4ed8",
+                      "tertiary-fixed-dim": "#ffb59c",
+                      "tertiary-container": "#a73400",
+                      "on-tertiary-container": "#ffc9b7",
+                      "on-secondary-container": "#596372",
+                      "surface-container": "#ededf9",
+                      "surface-container-high": "#e8e7f3",
+                      "on-surface": "#1a1b23",
+                      "secondary": "#555f6d",
+                      "surface-container-highest": "#e2e1ed",
+                      "on-error-container": "#93000a",
+                      "surface-dim": "#d9d9e5",
+                      "on-tertiary-fixed-variant": "#832700",
+                      "on-primary-fixed": "#001551",
+                      "secondary-fixed": "#d9e3f4",
+                      "outline-variant": "#c4c5d7",
+                      "primary-fixed-dim": "#b7c4ff",
+                      "inverse-on-surface": "#f0f0fb",
+                      "tertiary-fixed": "#ffdbcf",
+                      "surface-variant": "#e2e1ed",
+                      "primary": "#0037b0",
+                      "on-surface-variant": "#434655",
+                      "error-container": "#ffdad6",
+                      "inverse-primary": "#b7c4ff",
+                      "inverse-surface": "#2e3039",
+                      "on-error": "#ffffff",
+                      "secondary-fixed-dim": "#bdc7d8",
+                      "surface-container-lowest": "#ffffff",
+                      "on-tertiary-fixed": "#390c00",
+                      "surface": "#faf8ff",
+                      "primary-fixed": "#dce1ff",
+                      "on-background": "#1a1b23",
+                      "tertiary": "#7f2500",
+                      "secondary-container": "#d6e0f1",
+                      "on-tertiary": "#ffffff"
+              },
+              "borderRadius": {
+                      "DEFAULT": "0.25rem",
+                      "lg": "0.5rem",
+                      "xl": "0.75rem",
+                      "full": "9999px"
+              },
+              "spacing": {
+                      "container-padding": "24px",
+                      "stack-lg": "32px",
+                      "stack-md": "16px",
+                      "stack-sm": "8px",
+                      "gutter": "16px",
+                      "base": "4px"
+              },
+              "fontFamily": {
+                      "body-lg": ["Inter"],
+                      "headline-lg": ["Inter"],
+                      "headline-sm": ["Inter"],
+                      "headline-md": ["Inter"],
+                      "label-md": ["Inter"],
+                      "number-lg": ["Inter"],
+                      "number-md": ["Inter"],
+                      "body-md": ["Inter"],
+                      "label-sm": ["Inter"]
+              },
+              "fontSize": {
+                      "body-lg": ["16px", {"lineHeight": "24px", "fontWeight": "400"}],
+                      "headline-lg": ["30px", {"lineHeight": "38px", "letterSpacing": "-0.02em", "fontWeight": "600"}],
+                      "headline-sm": ["18px", {"lineHeight": "28px", "fontWeight": "600"}],
+                      "headline-md": ["24px", {"lineHeight": "32px", "letterSpacing": "-0.02em", "fontWeight": "600"}],
+                      "label-md": ["13px", {"lineHeight": "18px", "letterSpacing": "0.01em", "fontWeight": "500"}],
+                      "number-lg": ["24px", {"lineHeight": "32px", "fontWeight": "600"}],
+                      "number-md": ["14px", {"lineHeight": "20px", "fontWeight": "500"}],
+                      "body-md": ["14px", {"lineHeight": "20px", "fontWeight": "400"}],
+                      "label-sm": ["12px", {"lineHeight": "16px", "fontWeight": "500"}]
+              }
+            },
+          },
+        }
+    </script>
+</head>
+<body class="bg-surface-bright text-on-surface selection:bg-primary-fixed selection:text-on-primary-fixed">
+<!-- SideNavBar Shell -->
+<aside class="fixed left-0 top-0 h-screen flex flex-col py-stack-lg bg-surface border-r border-outline-variant w-64 z-50">
+<div class="px-6 mb-10">
+<h1 class="font-headline-sm text-headline-sm font-semibold text-primary">TransactWorld</h1>
+<p class="text-[11px] font-medium uppercase tracking-widest text-outline">Merchant Portal</p>
+</div>
+<nav class="flex-1 space-y-1">
+<!-- Active Item -->
+<a class="flex items-center px-6 py-3 text-primary font-bold border-r-2 border-primary bg-surface-container-low transition-colors" href="#">
+<span class="material-symbols-outlined mr-3">dashboard</span>
+<span class="font-body-md text-body-md">Dashboard</span>
+</a>
+<!-- Inactive Items -->
+<a class="flex items-center px-6 py-3 text-on-surface-variant hover:bg-surface-container transition-colors" href="#">
+<span class="material-symbols-outlined mr-3">storefront</span>
+<span class="font-body-md text-body-md">Merchants</span>
+</a>
+<a class="flex items-center px-6 py-3 text-on-surface-variant hover:bg-surface-container transition-colors" href="#">
+<span class="material-symbols-outlined mr-3">receipt_long</span>
+<span class="font-body-md text-body-md">Transactions</span>
+</a>
+<a class="flex items-center px-6 py-3 text-on-surface-variant hover:bg-surface-container transition-colors" href="#">
+<span class="material-symbols-outlined mr-3">payments</span>
+<span class="font-body-md text-body-md">Settlements</span>
+</a>
+<a class="flex items-center px-6 py-3 text-on-surface-variant hover:bg-surface-container transition-colors" href="#">
+<span class="material-symbols-outlined mr-3">account_balance_wallet</span>
+<span class="font-body-md text-body-md">Ledger</span>
+</a>
+<a class="flex items-center px-6 py-3 text-on-surface-variant hover:bg-surface-container transition-colors" href="#">
+<span class="material-symbols-outlined mr-3">verified_user</span>
+<span class="font-body-md text-body-md">Integrity</span>
+</a>
+</nav>
+<div class="mt-auto pt-6 border-t border-outline-variant mx-4">
+<a class="flex items-center px-2 py-3 text-on-surface-variant hover:bg-surface-container transition-colors" href="#">
+<span class="material-symbols-outlined mr-3">settings</span>
+<span class="font-body-md text-body-md">Profile Settings</span>
+</a>
+<a class="flex items-center px-2 py-3 text-on-surface-variant hover:bg-surface-container transition-colors" href="#">
+<span class="material-symbols-outlined mr-3">logout</span>
+<span class="font-body-md text-body-md">Logout</span>
+</a>
+</div>
+</aside>
+<!-- Main Content Area -->
+<main class="ml-64 min-h-screen flex flex-col">
+<!-- TopNavBar Shell -->
+<header class="flex justify-between items-center h-16 px-container-padding bg-background border-b border-outline-variant sticky top-0 z-40">
+<h2 class="font-headline-md text-headline-md">Dashboard Overview</h2>
+<div class="flex items-center space-x-6">
+<!-- Status Pill -->
+<div class="flex items-center px-3 py-1 bg-surface-container-highest rounded-full border border-outline-variant">
+<span class="w-2 h-2 rounded-full bg-emerald-500 mr-2"></span>
+<span class="font-label-sm text-label-sm text-on-surface-variant">✓ Ledger balanced</span>
+</div>
+<div class="flex items-center space-x-4">
+<span class="font-label-sm text-label-sm text-outline px-3 border-r border-outline-variant">System Status: <span class="text-emerald-600 font-bold">Operational</span></span>
+<button class="text-on-surface-variant hover:text-primary transition-colors"><span class="material-symbols-outlined">notifications</span></button>
+<button class="text-on-surface-variant hover:text-primary transition-colors"><span class="material-symbols-outlined">help_outline</span></button>
+<div class="w-8 h-8 rounded-full overflow-hidden border border-outline-variant">
+<img class="w-full h-full object-cover" data-alt="A clean, professional headshot of a financial operations manager in a high-key office environment, representing the TransactWorld brand's reliability and modern minimalist aesthetic. Soft lighting and a neutral background ensure visual clarity and focus." src="https://lh3.googleusercontent.com/aida-public/AB6AXuB7kl52jKBHJ5Ch56qSA0wqYahGx9xr1TQKatjDEP5p_X2NDaoae16KsOvqwhwpRQc9Oh6SLbRzysaPeeKP15xDfEg3uAAZ2hBcK_qRjXL0TmwBz7eb5kI6eGlYbM1d1b0U4R_jT8Y5-kjAhdQ9GM0ckHyivb-krDWnt0jtLMTDBantyhw8qb1l_4X6SUZ_2pj11fAksjk3369IFqxGh8qquxsnxGpIQR1tqJz-6lNRx_z8s4Z-pXhg9Cer_ZlsdvuR579TFQQXc3yc"/>
+</div>
+</div>
+</div>
+</header>
+<!-- Main Scrollable Canvas -->
+<div class="p-container-padding max-w-[1440px] w-full mx-auto space-y-stack-lg">
+<!-- Callout Bar -->
+<div class="flex items-center justify-between p-4 bg-tertiary-fixed rounded-xl border border-tertiary-container shadow-sm">
+<div class="flex items-center text-on-tertiary-fixed">
+<span class="material-symbols-outlined mr-3 text-tertiary-container" data-weight="fill">warning</span>
+<span class="font-body-md text-body-md font-medium text-tertiary">3 merchants need fees set to avoid settlement delays</span>
+</div>
+<button class="px-4 py-1.5 bg-tertiary-container text-on-tertiary-container rounded-lg font-label-md text-label-md hover:opacity-90 transition-opacity">
+                    Configure Fees
+                </button>
+</div>
+<!-- KPI Row -->
+<section class="grid grid-cols-1 md:grid-cols-4 gap-gutter">
+<div class="bg-surface-container-lowest p-stack-md rounded-xl border border-outline-variant flex flex-col space-y-base">
+<span class="font-label-md text-label-md text-outline uppercase tracking-wider">Merchants</span>
+<div class="flex items-baseline justify-between">
+<span class="font-number-lg text-number-lg">1,248</span>
+<span class="font-label-sm text-label-sm text-emerald-600 flex items-center">+4.2% <span class="material-symbols-outlined text-[14px]">arrow_upward</span></span>
+</div>
+</div>
+<div class="bg-surface-container-lowest p-stack-md rounded-xl border border-outline-variant flex flex-col space-y-base">
+<span class="font-label-md text-label-md text-outline uppercase tracking-wider">Transactions</span>
+<div class="flex items-baseline justify-between">
+<span class="font-number-lg text-number-lg tabular-nums">48,902</span>
+<div class="flex flex-col text-right">
+<span class="font-label-sm text-label-sm text-emerald-600">47.1k Paid</span>
+<span class="font-label-sm text-label-sm text-error">1.8k Declined</span>
+</div>
+</div>
+</div>
+<div class="bg-surface-container-lowest p-stack-md rounded-xl border border-outline-variant flex flex-col space-y-base">
+<span class="font-label-md text-label-md text-outline uppercase tracking-wider">Settlements</span>
+<div class="flex items-baseline justify-between">
+<span class="font-number-lg text-number-lg tabular-nums">312</span>
+<span class="font-label-sm text-label-sm text-on-surface-variant">Batch: #8902</span>
+</div>
+</div>
+<div class="bg-surface-container-lowest p-stack-md rounded-xl border border-outline-variant flex flex-col space-y-base">
+<span class="font-label-md text-label-md text-outline uppercase tracking-wider">Total Paid Out</span>
+<div class="flex items-baseline justify-between">
+<span class="font-number-lg text-number-lg tabular-nums">$4.2M</span>
+<span class="font-label-sm text-label-sm text-emerald-600 flex items-center">+12.8% <span class="material-symbols-outlined text-[14px]">trending_up</span></span>
+</div>
+</div>
+</section>
+<!-- By Currency Section & Chart Grid -->
+<div class="grid grid-cols-1 lg:grid-cols-3 gap-stack-lg items-start">
+<!-- By Currency List/Grid -->
+<section class="lg:col-span-1 space-y-stack-md">
+<div class="flex items-center justify-between">
+<h3 class="font-headline-sm text-headline-sm">By Currency</h3>
+<div class="flex bg-surface-container rounded-lg p-1">
+<button class="px-3 py-1 text-primary bg-surface-container-lowest rounded-md shadow-sm transition-all">
+<span class="material-symbols-outlined text-[20px]">grid_view</span>
+</button>
+<button class="px-3 py-1 text-on-surface-variant hover:text-primary transition-all">
+<span class="material-symbols-outlined text-[20px]">list</span>
+</button>
+</div>
+</div>
+<div class="space-y-gutter">
+<!-- USD Card -->
+<div class="bg-surface-container-lowest border border-outline-variant rounded-xl p-stack-md overflow-hidden relative">
+<div class="flex justify-between items-center mb-4">
+<div class="flex items-center space-x-2">
+<span class="w-8 h-8 flex items-center justify-center bg-primary-fixed text-on-primary-fixed rounded-full font-bold text-xs">USD</span>
+<span class="font-label-md text-label-md">United States Dollar</span>
+</div>
+<span class="material-symbols-outlined text-outline">more_vert</span>
+</div>
+<div class="space-y-stack-sm font-body-md text-body-md text-on-surface-variant">
+<div class="flex justify-between border-b border-surface-container-high pb-2 tabular-nums">
+<span>Captured</span>
+<span class="font-bold text-on-surface">2,840,122.50 <span class="text-[10px] text-outline font-normal">USD</span></span>
+</div>
+<div class="flex justify-between border-b border-surface-container-high pb-2 tabular-nums">
+<span>Fees</span>
+<span class="text-error font-medium">85,203.67 <span class="text-[10px] text-outline font-normal">USD</span></span>
+</div>
+<div class="flex justify-between pt-1 tabular-nums">
+<span class="font-bold text-primary">Net Payable</span>
+<span class="font-bold text-primary">2,754,918.83 <span class="text-[10px] text-outline font-normal">USD</span></span>
+</div>
+</div>
+<div class="mt-4 flex gap-4 pt-3 border-t border-outline-variant">
+<div class="flex flex-col">
+<span class="text-[10px] uppercase text-outline">Paid</span>
+<span class="text-emerald-600 font-bold tabular-nums">42,102</span>
+</div>
+<div class="flex flex-col">
+<span class="text-[10px] uppercase text-outline">Declined</span>
+<span class="text-error font-bold tabular-nums">1,105</span>
+</div>
+</div>
+</div>
+<!-- EUR Card -->
+<div class="bg-surface-container-lowest border border-outline-variant rounded-xl p-stack-md overflow-hidden relative">
+<div class="flex justify-between items-center mb-4">
+<div class="flex items-center space-x-2">
+<span class="w-8 h-8 flex items-center justify-center bg-secondary-fixed text-on-secondary-fixed rounded-full font-bold text-xs">EUR</span>
+<span class="font-label-md text-label-md">Euro</span>
+</div>
+<span class="material-symbols-outlined text-outline">more_vert</span>
+</div>
+<div class="space-y-stack-sm font-body-md text-body-md text-on-surface-variant">
+<div class="flex justify-between border-b border-surface-container-high pb-2 tabular-nums">
+<span>Captured</span>
+<span class="font-bold text-on-surface">1,120,450.00 <span class="text-[10px] text-outline font-normal">EUR</span></span>
+</div>
+<div class="flex justify-between border-b border-surface-container-high pb-2 tabular-nums">
+<span>Fees</span>
+<span class="text-error font-medium">33,613.50 <span class="text-[10px] text-outline font-normal">EUR</span></span>
+</div>
+<div class="flex justify-between pt-1 tabular-nums">
+<span class="font-bold text-primary">Net Payable</span>
+<span class="font-bold text-primary">1,086,836.50 <span class="text-[10px] text-outline font-normal">EUR</span></span>
+</div>
+</div>
+</div>
+<!-- GBP Card -->
+<div class="bg-surface-container-lowest border border-outline-variant rounded-xl p-stack-md overflow-hidden relative">
+<div class="flex justify-between items-center mb-4">
+<div class="flex items-center space-x-2">
+<span class="w-8 h-8 flex items-center justify-center bg-tertiary-fixed text-on-tertiary-fixed rounded-full font-bold text-xs">GBP</span>
+<span class="font-label-md text-label-md">British Pound</span>
+</div>
+<span class="material-symbols-outlined text-outline">more_vert</span>
+</div>
+<div class="space-y-stack-sm font-body-md text-body-md text-on-surface-variant">
+<div class="flex justify-between border-b border-surface-container-high pb-2 tabular-nums">
+<span>Captured</span>
+<span class="font-bold text-on-surface">845,900.22 <span class="text-[10px] text-outline font-normal">GBP</span></span>
+</div>
+<div class="flex justify-between border-b border-surface-container-high pb-2 tabular-nums">
+<span>Fees</span>
+<span class="text-error font-medium">25,377.00 <span class="text-[10px] text-outline font-normal">GBP</span></span>
+</div>
+<div class="flex justify-between pt-1 tabular-nums">
+<span class="font-bold text-primary">Net Payable</span>
+<span class="font-bold text-primary">820,523.22 <span class="text-[10px] text-outline font-normal">GBP</span></span>
+</div>
+</div>
+</div>
+</div>
+</section>
+<!-- Chart Column -->
+<section class="lg:col-span-2 space-y-stack-md">
+<div class="flex items-center justify-between">
+<h3 class="font-headline-sm text-headline-sm">Daily Captured Volume</h3>
+<div class="flex space-x-2">
+<button class="px-3 py-1 font-label-sm text-label-sm rounded-lg bg-primary text-on-primary">USD</button>
+<button class="px-3 py-1 font-label-sm text-label-sm rounded-lg bg-surface-container-high text-on-surface-variant hover:bg-surface-container-highest">EUR</button>
+<button class="px-3 py-1 font-label-sm text-label-sm rounded-lg bg-surface-container-high text-on-surface-variant hover:bg-surface-container-highest">GBP</button>
+</div>
+</div>
+<div class="bg-surface-container-lowest border border-outline-variant rounded-xl p-stack-lg h-[480px] flex flex-col">
+<!-- Minimal Bar Chart Mock -->
+<div class="flex-1 flex items-end justify-between space-x-2 relative pt-10">
+<!-- Y-Axis labels -->
+<div class="absolute left-0 top-0 h-full flex flex-col justify-between text-[10px] text-outline font-bold -ml-4">
+<span>500k</span>
+<span>400k</span>
+<span>300k</span>
+<span>200k</span>
+<span>100k</span>
+<span>0</span>
+</div>
+<!-- Bars -->
+<div class="flex-1 flex items-end space-x-2 h-full pl-6 border-l border-b border-outline-variant pb-2">
+<div class="flex-1 bg-primary-container h-[40%] rounded-t-sm hover:bg-primary transition-colors cursor-help group relative">
+<div class="absolute -top-10 left-1/2 -translate-x-1/2 bg-on-surface text-surface text-[10px] px-2 py-1 rounded hidden group-hover:block whitespace-nowrap">$182,400</div>
+</div>
+<div class="flex-1 bg-primary-container h-[55%] rounded-t-sm hover:bg-primary transition-colors cursor-help group relative">
+<div class="absolute -top-10 left-1/2 -translate-x-1/2 bg-on-surface text-surface text-[10px] px-2 py-1 rounded hidden group-hover:block whitespace-nowrap">$241,102</div>
+</div>
+<div class="flex-1 bg-primary-container h-[85%] rounded-t-sm hover:bg-primary transition-colors cursor-help group relative">
+<div class="absolute -top-10 left-1/2 -translate-x-1/2 bg-on-surface text-surface text-[10px] px-2 py-1 rounded hidden group-hover:block whitespace-nowrap">$412,090</div>
+</div>
+<div class="flex-1 bg-primary-container h-[70%] rounded-t-sm hover:bg-primary transition-colors cursor-help group relative">
+<div class="absolute -top-10 left-1/2 -translate-x-1/2 bg-on-surface text-surface text-[10px] px-2 py-1 rounded hidden group-hover:block whitespace-nowrap">$320,550</div>
+</div>
+<div class="flex-1 bg-primary-container h-[45%] rounded-t-sm hover:bg-primary transition-colors cursor-help group relative">
+<div class="absolute -top-10 left-1/2 -translate-x-1/2 bg-on-surface text-surface text-[10px] px-2 py-1 rounded hidden group-hover:block whitespace-nowrap">$198,332</div>
+</div>
+<div class="flex-1 bg-primary-container h-[90%] rounded-t-sm hover:bg-primary transition-colors cursor-help group relative">
+<div class="absolute -top-10 left-1/2 -translate-x-1/2 bg-on-surface text-surface text-[10px] px-2 py-1 rounded hidden group-hover:block whitespace-nowrap">$465,000</div>
+</div>
+<div class="flex-1 bg-primary-container h-[60%] rounded-t-sm hover:bg-primary transition-colors cursor-help group relative">
+<div class="absolute -top-10 left-1/2 -translate-x-1/2 bg-on-surface text-surface text-[10px] px-2 py-1 rounded hidden group-hover:block whitespace-nowrap">$270,119</div>
+</div>
+<div class="flex-1 bg-primary-container h-[35%] rounded-t-sm hover:bg-primary transition-colors cursor-help group relative">
+<div class="absolute -top-10 left-1/2 -translate-x-1/2 bg-on-surface text-surface text-[10px] px-2 py-1 rounded hidden group-hover:block whitespace-nowrap">$145,200</div>
+</div>
+</div>
+</div>
+<div class="flex justify-between pt-4 pl-12 text-[10px] text-outline font-bold uppercase tracking-widest">
+<span>Mon</span>
+<span>Tue</span>
+<span>Wed</span>
+<span>Thu</span>
+<span>Fri</span>
+<span>Sat</span>
+<span>Sun</span>
+<span>Today</span>
+</div>
+</div>
+</section>
+</div>
+<!-- Top Merchants Table -->
+<section class="space-y-stack-md">
+<div class="flex items-center justify-between">
+<h3 class="font-headline-sm text-headline-sm">Top Merchants by Volume</h3>
+<button class="text-primary font-label-md text-label-md hover:underline">View All Merchants</button>
+</div>
+<div class="bg-surface-container-lowest border border-outline-variant rounded-xl overflow-hidden shadow-sm">
+<table class="w-full text-left">
+<thead class="bg-surface-container-high border-b border-outline-variant">
+<tr>
+<th class="px-6 py-3 font-label-sm text-label-sm text-outline uppercase tracking-wider">Merchant Name</th>
+<th class="px-6 py-3 font-label-sm text-label-sm text-outline uppercase tracking-wider">ID</th>
+<th class="px-6 py-3 font-label-sm text-label-sm text-outline uppercase tracking-wider text-right">Volume (Captured)</th>
+<th class="px-6 py-3 font-label-sm text-label-sm text-outline uppercase tracking-wider text-right">Transactions</th>
+<th class="px-6 py-3 font-label-sm text-label-sm text-outline uppercase tracking-wider">Status</th>
+<th class="px-6 py-3 font-label-sm text-label-sm text-outline uppercase tracking-wider">Region</th>
+</tr>
+</thead>
+<tbody class="divide-y divide-outline-variant font-body-md text-body-md text-on-surface">
+<tr class="hover:bg-surface-bright transition-colors group cursor-pointer">
+<td class="px-6 py-4 font-bold">CloudStream Dynamics</td>
+<td class="px-6 py-4 text-on-surface-variant font-mono text-[11px]">TW-9842-X</td>
+<td class="px-6 py-4 text-right tabular-nums">412,050.22 <span class="text-[10px] text-outline">USD</span></td>
+<td class="px-6 py-4 text-right tabular-nums">12,402</td>
+<td class="px-6 py-4">
+<div class="inline-flex items-center px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800 text-[11px] font-bold uppercase">
+<span class="w-1.5 h-1.5 rounded-full bg-emerald-500 mr-1.5"></span>
+                                        Active
+                                    </div>
+</td>
+<td class="px-6 py-4 text-on-surface-variant">North America</td>
+</tr>
+<tr class="hover:bg-surface-bright transition-colors group cursor-pointer">
+<td class="px-6 py-4 font-bold">Velvet & Vine Retail</td>
+<td class="px-6 py-4 text-on-surface-variant font-mono text-[11px]">TW-1102-L</td>
+<td class="px-6 py-4 text-right tabular-nums">389,122.90 <span class="text-[10px] text-outline">USD</span></td>
+<td class="px-6 py-4 text-right tabular-nums">8,940</td>
+<td class="px-6 py-4">
+<div class="inline-flex items-center px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800 text-[11px] font-bold uppercase">
+<span class="w-1.5 h-1.5 rounded-full bg-emerald-500 mr-1.5"></span>
+                                        Active
+                                    </div>
+</td>
+<td class="px-6 py-4 text-on-surface-variant">Europe</td>
+</tr>
+<tr class="hover:bg-surface-bright transition-colors group cursor-pointer">
+<td class="px-6 py-4 font-bold">Titan Logistics Corp</td>
+<td class="px-6 py-4 text-on-surface-variant font-mono text-[11px]">TW-3450-M</td>
+<td class="px-6 py-4 text-right tabular-nums">215,600.00 <span class="text-[10px] text-outline">EUR</span></td>
+<td class="px-6 py-4 text-right tabular-nums">4,212</td>
+<td class="px-6 py-4">
+<div class="inline-flex items-center px-2 py-0.5 rounded-full bg-tertiary-fixed text-tertiary text-[11px] font-bold uppercase">
+<span class="w-1.5 h-1.5 rounded-full bg-tertiary mr-1.5"></span>
+                                        Review
+                                    </div>
+</td>
+<td class="px-6 py-4 text-on-surface-variant">Asia Pacific</td>
+</tr>
+<tr class="hover:bg-surface-bright transition-colors group cursor-pointer">
+<td class="px-6 py-4 font-bold">Aura Skin Care</td>
+<td class="px-6 py-4 text-on-surface-variant font-mono text-[11px]">TW-0021-S</td>
+<td class="px-6 py-4 text-right tabular-nums">198,340.55 <span class="text-[10px] text-outline">GBP</span></td>
+<td class="px-6 py-4 text-right tabular-nums">3,892</td>
+<td class="px-6 py-4">
+<div class="inline-flex items-center px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800 text-[11px] font-bold uppercase">
+<span class="w-1.5 h-1.5 rounded-full bg-emerald-500 mr-1.5"></span>
+                                        Active
+                                    </div>
+</td>
+<td class="px-6 py-4 text-on-surface-variant">North America</td>
+</tr>
+<tr class="hover:bg-surface-bright transition-colors group cursor-pointer">
+<td class="px-6 py-4 font-bold">Zenith Apparels</td>
+<td class="px-6 py-4 text-on-surface-variant font-mono text-[11px]">TW-7762-K</td>
+<td class="px-6 py-4 text-right tabular-nums">145,200.00 <span class="text-[10px] text-outline">USD</span></td>
+<td class="px-6 py-4 text-right tabular-nums">2,410</td>
+<td class="px-6 py-4">
+<div class="inline-flex items-center px-2 py-0.5 rounded-full bg-error-container text-error text-[11px] font-bold uppercase">
+<span class="w-1.5 h-1.5 rounded-full bg-error mr-1.5"></span>
+                                        Pending
+                                    </div>
+</td>
+<td class="px-6 py-4 text-on-surface-variant">Europe</td>
+</tr>
+</tbody>
+</table>
+</div>
+</section>
+</div>
+<!-- Footer / Status Anchor -->
+<footer class="mt-auto px-container-padding py-6 border-t border-outline-variant bg-surface text-outline font-label-sm text-label-sm flex justify-between items-center">
+<span>© 2024 TransactWorld FinTech Core. All transactions encrypted.</span>
+<div class="flex items-center space-x-4">
+<span class="flex items-center"><span class="w-2 h-2 rounded-full bg-emerald-500 mr-2"></span> API v2.4 Status: 22ms latency</span>
+<span>UTC: 14:22:10</span>
+</div>
+</footer>
+</main>
+<script>
+        // Simple micro-interaction for currency tab switching
+        const currencyButtons = document.querySelectorAll('section:nth-of-type(3) .flex.space-x-2 button');
+        currencyButtons.forEach(btn => {
+            btn.addEventListener('click', () => {
+                currencyButtons.forEach(b => {
+                    b.classList.remove('bg-primary', 'text-on-primary');
+                    b.classList.add('bg-surface-container-high', 'text-on-surface-variant');
+                });
+                btn.classList.add('bg-primary', 'text-on-primary');
+                btn.classList.remove('bg-surface-container-high', 'text-on-surface-variant');
+            });
+        });
+    </script>
+</body></html>

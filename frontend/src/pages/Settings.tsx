@@ -146,7 +146,7 @@ export default function Settings() {
                 <label>From address</label>
                 <input
                   className="input"
-                  placeholder="TransactWorld &lt;payouts@yourdomain.com&gt;"
+                  placeholder="CoreServices &lt;payouts@yourdomain.com&gt;"
                   value={fromAddr}
                   onChange={(e) => setFromAddr(e.target.value)}
                 />

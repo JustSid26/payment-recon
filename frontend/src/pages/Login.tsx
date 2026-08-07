@@ -7,7 +7,7 @@ type Role = 'merchant' | 'admin'
 type Mode = 'login' | 'set-password'
 
 const DEMO: Record<Role, { email: string; password: string; sub: string }> = {
-  admin: { email: 'admin@transactworld.com', password: 'demo123', sub: 'TransactWorld operations' },
+  admin: { email: 'admin@transactworld.com', password: 'demo123', sub: 'CoreServices operations' },
   merchant: { email: 'merchant@canamoney.com', password: 'demo123', sub: 'CANAMONEY EXCHANGE LTD.' },
 }
 
@@ -138,10 +138,10 @@ export default function Login() {
             display: 'flex', alignItems: 'center', justifyContent: 'center',
             color: '#fff', fontWeight: 700, fontSize: 16,
           }}>
-            TW
+            CS
           </div>
           <div>
-            <h1>TransactWorld</h1>
+            <h1>CoreServices</h1>
             <div className="dim small">Merchant settlement &amp; ledger platform</div>
           </div>
         </div>
@@ -170,7 +170,7 @@ export default function Login() {
         <div className="login-heading">
           <h2>{isMerchant ? 'Merchant sign in' : 'Admin sign in'}</h2>
           <div className="dim small">
-            {isMerchant ? 'Sign in with your merchant ID or email.' : 'TransactWorld operations console.'}
+            {isMerchant ? 'Sign in with your merchant ID or email.' : 'CoreServices operations console.'}
           </div>
         </div>
 
