@@ -530,7 +530,8 @@ export default function SettlementDetailPage({ uuid: uuidProp, embedded }: { uui
       </div>
 
       <div className="statement-bar" data-print="hide">
-        <div className="seg">
+        <span className="export-label">View</span>
+        <div className="seg seg-lg">
           <button className={view === 'statement' ? 'on' : ''} onClick={() => setView('statement')}>
             Whole settlement
           </button>
