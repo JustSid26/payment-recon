@@ -601,5 +601,6 @@ export interface MerchantInsight {
   merchant_uuid: string; name: string; transactions: number
   accepted: number; declined: number; acceptance_rate: number | null
   captured: { currency: string; minor: number }[]
+  settlements: number; settlements_paid: number; settled_net_minor: number
 }
 export interface MerchantsResponse { merchants: MerchantInsight[] }

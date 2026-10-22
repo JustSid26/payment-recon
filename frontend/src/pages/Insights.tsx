@@ -185,10 +185,32 @@ export default function Insights() {
   return <InsightsDetail merchant={selected} onBack={isAdmin ? () => setSelected(null) : undefined} />
 }
 
-// Admin landing: one metric card per merchant, click to drill into its insights.
+// Admin landing: a portfolio summary, then one ranked metric card per merchant.
 function MerchantLanding({ onPick }: { onPick: (m: PickedMerchant) => void }) {
   const { data, loading } = useApi(() => api<MerchantsResponse>('/api/insights/merchants'), [])
   const list = data?.merchants ?? []
+
+  // Rank by acceptance (who's doing better) — enough-volume merchants first, then
+  // the long tail; the top of that list is the portfolio leader.
+  const ranked = useMemo(() => {
+    const score = (m: typeof list[number]) =>
+      (m.acceptance_rate ?? -1) * (m.transactions >= 20 ? 1 : 0.5) // de-rank tiny samples
+    return [...list].sort((a, b) => score(b) - score(a))
+  }, [list])
+
+  const totals = useMemo(() => {
+    const acc = list.reduce((s, m) => s + m.accepted, 0)
+    const dec = list.reduce((s, m) => s + m.declined, 0)
+    return {
+      merchants: list.length,
+      transactions: list.reduce((s, m) => s + m.transactions, 0),
+      accepted: acc, declined: dec,
+      acceptance_rate: acc + dec ? acc / (acc + dec) : null,
+      settlements: list.reduce((s, m) => s + m.settlements, 0),
+    }
+  }, [list])
+  const leader = ranked.find((m) => m.acceptance_rate != null && m.transactions >= 20) ?? ranked[0]
+
   return (
     <div className="stack">
       <div className="page-head">
@@ -202,37 +224,62 @@ function MerchantLanding({ onPick }: { onPick: (m: PickedMerchant) => void }) {
         <EmptyState title="No merchants to analyse yet" hint="Insights appear once transactions are imported." />
       )}
       {list.length > 0 && (
-        <div className="insights-merchant-grid">
-          {list.map((m) => {
-            const sig = rateSignal(m.acceptance_rate)
-            return (
-              <button
-                key={m.merchant_uuid}
-                className="minsight-card"
-                onClick={() => onPick({ uuid: m.merchant_uuid, name: m.name })}
-              >
-                <div className="minsight-top">
-                  <span className="minsight-name" title={m.name}>{m.name}</span>
-                  <span className={`signal-chip ${sig.signal}`}>{sig.label}</span>
-                </div>
-                <AcceptBar rate={m.acceptance_rate} signal={sig.signal} />
-                <div className="minsight-stats">
-                  <div><span className="dim small">Transactions</span><b className="num">{fmtInt(m.transactions)}</b></div>
-                  <div><span className="dim small">Accepted</span><b className="num" style={{ color: 'var(--green)' }}>{fmtInt(m.accepted)}</b></div>
-                  <div><span className="dim small">Declined</span><b className="num" style={{ color: 'var(--red)' }}>{fmtInt(m.declined)}</b></div>
-                </div>
-                {m.captured.length > 0 && (
-                  <div className="minsight-cap">
-                    {m.captured.map((v) => (
-                      <span key={v.currency} className="cap-tag"><span className="ccy-tag">{v.currency}</span> {fmtMoney(v.minor, v.currency)}</span>
-                    ))}
+        <>
+          <div className="insights-portfolio">
+            <div className="ip-stat"><span className="eyebrow2">Merchants</span><b className="num">{fmtInt(totals.merchants)}</b></div>
+            <div className="ip-stat"><span className="eyebrow2">Transactions</span><b className="num">{fmtInt(totals.transactions)}</b></div>
+            <div className="ip-stat"><span className="eyebrow2">Overall acceptance</span><b className="num">{pct(totals.acceptance_rate)}</b></div>
+            <div className="ip-stat"><span className="eyebrow2">Settlements</span><b className="num">{fmtInt(totals.settlements)}</b></div>
+            {leader && list.length > 1 && (
+              <div className="ip-leader">
+                <span className="eyebrow2">Top performer</span>
+                <b title={leader.name}>★ {leader.name}</b>
+                <span className="dim small">{pct(leader.acceptance_rate)} acceptance</span>
+              </div>
+            )}
+          </div>
+
+          <div className="insights-merchant-grid">
+            {ranked.map((m, i) => {
+              const sig = rateSignal(m.acceptance_rate)
+              const isLeader = list.length > 1 && m.merchant_uuid === leader?.merchant_uuid
+              return (
+                <button
+                  key={m.merchant_uuid}
+                  className={`minsight-card${isLeader ? ' is-leader' : ''}`}
+                  onClick={() => onPick({ uuid: m.merchant_uuid, name: m.name })}
+                >
+                  <div className="minsight-top">
+                    <span className="minsight-name" title={m.name}>
+                      <span className="minsight-rank">#{i + 1}</span> {m.name}
+                    </span>
+                    {isLeader ? <span className="signal-chip good">★ Top</span>
+                      : <span className={`signal-chip ${sig.signal}`}>{sig.label}</span>}
                   </div>
-                )}
-                <span className="minsight-go">View insights →</span>
-              </button>
-            )
-          })}
-        </div>
+                  <AcceptBar rate={m.acceptance_rate} signal={sig.signal} />
+                  <div className="minsight-stats">
+                    <div><span className="dim small">Transactions</span><b className="num">{fmtInt(m.transactions)}</b></div>
+                    <div><span className="dim small">Accepted</span><b className="num" style={{ color: 'var(--green)' }}>{fmtInt(m.accepted)}</b></div>
+                    <div><span className="dim small">Declined</span><b className="num" style={{ color: 'var(--red)' }}>{fmtInt(m.declined)}</b></div>
+                  </div>
+                  <div className="minsight-settle">
+                    <span className="dim small">Settlements</span>
+                    <b className="num">{fmtInt(m.settlements)}</b>
+                    {m.settlements_paid > 0 && <span className="dim small">· {fmtInt(m.settlements_paid)} paid</span>}
+                  </div>
+                  {m.captured.length > 0 && (
+                    <div className="minsight-cap">
+                      {m.captured.map((v) => (
+                        <span key={v.currency} className="cap-tag"><span className="ccy-tag">{v.currency}</span> {fmtMoney(v.minor, v.currency)}</span>
+                      ))}
+                    </div>
+                  )}
+                  <span className="minsight-go">View insights →</span>
+                </button>
+              )
+            })}
+          </div>
+        </>
       )}
     </div>
   )

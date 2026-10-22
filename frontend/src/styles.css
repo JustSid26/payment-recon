@@ -1363,6 +1363,23 @@ table.data tbody tr.click:hover { background: #f8faff; }
 .minsight-stats > div { display: flex; flex-direction: column; gap: 2px; }
 .minsight-cap { display: flex; flex-wrap: wrap; gap: 6px; }
 .minsight-go { font-size: 13px; font-weight: 600; color: var(--blue, #2e90fa); margin-top: auto; }
+.minsight-rank { font-size: 12px; font-weight: 700; color: var(--ink-2, #667085); font-variant-numeric: tabular-nums; }
+.minsight-settle { display: flex; align-items: baseline; gap: 6px; }
+.minsight-card.is-leader { border-color: var(--green-border, #abefc6); box-shadow: 0 0 0 1px var(--green-border, #abefc6) inset; }
+
+/* Portfolio summary strip */
+.insights-portfolio {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 14px 28px;
+  background: var(--card, #fff); border: 1px solid var(--border); border-radius: 14px;
+  padding: 16px 20px;
+}
+.ip-stat { display: flex; flex-direction: column; gap: 3px; }
+.ip-stat .num { font-size: 20px; }
+.ip-leader {
+  display: flex; flex-direction: column; gap: 3px; margin-left: auto;
+  padding-left: 20px; border-left: 1px solid var(--border);
+}
+.ip-leader b { color: #067647; }
 
 .signal-chip {
   display: inline-block; font-size: 11.5px; font-weight: 600; padding: 3px 9px; border-radius: 999px;

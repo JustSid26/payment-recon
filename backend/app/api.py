@@ -544,11 +544,26 @@ def insights_merchants(user: dict = Depends(current_user)):
             a["declined"] += int(r["declined"])
             if int(r["captured"]) > 0:
                 a["cap"][r["currency"]] = a["cap"].get(r["currency"], 0) + int(r["captured"])
+        # settlement counts per merchant (excl. cancelled), scoped the same way
+        cur.execute(f"""
+            SELECT m.merchant_uuid,
+                   COUNT(s.id) settlements,
+                   COUNT(s.id) FILTER (WHERE s.state='completed') settlements_paid,
+                   COALESCE(SUM(s.net_payout_minor),0) net_minor
+              FROM merchants m
+              LEFT JOIN settlements s ON s.merchant_id=m.id AND s.state <> 'cancelled'
+             {"WHERE m.id=%(mid)s" if mid else ""}
+             GROUP BY m.merchant_uuid""", {"mid": mid})
+        scounts = {str(r["merchant_uuid"]): r for r in cur.fetchall()}
         out = []
         for a in agg.values():
             decided = a["accepted"] + a["declined"]
             a["acceptance_rate"] = round(a["accepted"] / decided, 4) if decided else None
             a["captured"] = [{"currency": k, "minor": v} for k, v in sorted(a.pop("cap").items())]
+            s = scounts.get(a["merchant_uuid"], {})
+            a["settlements"] = int(s.get("settlements", 0) or 0)
+            a["settlements_paid"] = int(s.get("settlements_paid", 0) or 0)
+            a["settled_net_minor"] = int(s.get("net_minor", 0) or 0)
             out.append(a)
         out.sort(key=lambda x: -x["transactions"])
         return {"merchants": out}
