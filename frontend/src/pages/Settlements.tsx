@@ -1,85 +1,97 @@
-import { useMemo, useState } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { Fragment, useMemo, useState } from 'react'
 import { api, getUser } from '../lib/api'
 import { useApi } from '../lib/useApi'
 import type { Merchant, Settlement } from '../lib/types'
-import { fmtDate, fmtInt } from '../lib/money'
+import { fmtDate, fmtInt, fmtMoney } from '../lib/money'
 import { DataTable, EmptyState, MoneyCell, StatusChip, type Column } from '../components/ui'
 import DailySettlementRecords from '../components/DailySettlementRecords'
 import SettlementDetailPage from './SettlementDetail'
 
-const CURRENCIES = ['EUR', 'USD', 'AUD', 'CAD', 'GBP', 'JPY']
+type MerchantGroup = {
+  merchant_uuid: string
+  merchant_name: string
+  currencies: string[]
+  nets: { currency: string; minor: number }[]
+  openCount: number
+  settlements: Settlement[]
+}
 
 export default function Settlements() {
   const user = getUser()!
   const isAdmin = user.role === 'admin'
-  const navigate = useNavigate()
 
   const [view, setView] = useState<'list' | 'daily'>('list')
-  const [merchantUuid, setMerchantUuid] = useState('')
-  const [currency, setCurrency] = useState('')
-  const [code, setCode] = useState('')
+  const [merchantUuid, setMerchantUuid] = useState('')       // daily view: which merchant
+  const [openMerchant, setOpenMerchant] = useState<string | null>(null) // list drill-down
+  const [q, setQ] = useState('')
 
   const merchants = useApi(
     () => (isAdmin ? api<{ items: Merchant[] }>('/api/merchants') : Promise.resolve(null)),
     [isAdmin],
   )
 
-  const { data, loading } = useApi(
-    () =>
-      api<{ items: Settlement[] }>('/api/settlements', {
-        params: { merchant_uuid: isAdmin ? merchantUuid : undefined, currency, code: code.trim() || undefined },
-      }),
-    [merchantUuid, currency, code, isAdmin],
+  const { data, loading } = useApi(() => api<{ items: Settlement[] }>('/api/settlements'), [])
+
+  // Cancelled settlements are an internal artifact of the one-account model — hide them.
+  const visibleItems = useMemo(
+    () => (data?.items ?? []).filter((s) => s.state !== 'cancelled'),
+    [data],
   )
 
-  const cols: Column<Settlement>[] = [
-    ...(isAdmin
-      ? ([
-          {
-            key: 'merchant',
-            header: 'Merchant',
-            render: (s: Settlement) => <b>{s.merchant_name}</b>,
-          },
-        ] as Column<Settlement>[])
-      : []),
+  // Level 1 (admin): one row per merchant, aggregating its per-currency settlements.
+  const groups = useMemo<MerchantGroup[]>(() => {
+    const m = new Map<string, MerchantGroup>()
+    for (const s of visibleItems) {
+      let g = m.get(s.merchant_uuid)
+      if (!g) {
+        g = { merchant_uuid: s.merchant_uuid, merchant_name: s.merchant_name,
+              currencies: [], nets: [], openCount: 0, settlements: [] }
+        m.set(s.merchant_uuid, g)
+      }
+      g.settlements.push(s)
+      if (!g.currencies.includes(s.currency)) g.currencies.push(s.currency)
+      g.nets.push({ currency: s.currency, minor: s.net_payout_minor })
+      if (s.state !== 'completed') g.openCount += 1
+    }
+    for (const g of m.values()) g.currencies.sort()
+    return [...m.values()].sort((a, b) => a.merchant_name.localeCompare(b.merchant_name))
+  }, [visibleItems])
+
+  const filteredGroups = useMemo(() => {
+    const needle = q.trim().toLowerCase()
+    return needle ? groups.filter((g) => g.merchant_name.toLowerCase().includes(needle)) : groups
+  }, [groups, q])
+
+  const openGroup = openMerchant ? groups.find((g) => g.merchant_uuid === openMerchant) : null
+
+  const merchantCols: Column<MerchantGroup>[] = [
+    { key: 'name', header: 'Merchant', render: (g) => <b>{g.merchant_name}</b> },
     {
-      key: 'code',
-      header: 'Confirmation code',
-      render: (s) => <span className="mono small">{s.confirmation_code ?? '—'}</span>,
-    },
-    { key: 'ccy', header: 'Currency', render: (s) => <span className="ccy-tag">{s.currency}</span> },
-    {
-      key: 'window',
-      header: 'Window',
-      render: (s) => (
-        <span className="nowrap num">
-          {fmtDate(s.window_start)} → {fmtDate(s.window_end)}
-        </span>
+      key: 'ccy', header: 'Currencies',
+      render: (g) => (
+        <div className="ccy-chip-row">
+          {g.currencies.map((c) => <span key={c} className="ccy-tag">{c}</span>)}
+        </div>
       ),
     },
-    { key: 'state', header: 'State', render: (s) => <StatusChip status={s.state} /> },
+    { key: 'net', header: 'Net payout', align: 'right', render: (g) => <NetStack rows={g.nets} /> },
     {
-      key: 'counts',
-      header: 'Paid / Declined',
-      align: 'right',
-      render: (s) => (
-        <span className="num">
-          {fmtInt(s.paid_count)} / {fmtInt(s.declined_count)}
-        </span>
-      ),
-    },
-    {
-      key: 'net',
-      header: 'Net payout',
-      align: 'right',
-      render: (s) => (
-        <b>
-          <MoneyCell minor={s.net_payout_minor} currency={s.currency} />
-        </b>
-      ),
+      key: 'state', header: 'To settle', align: 'right',
+      render: (g) =>
+        g.openCount > 0
+          ? <span className="pill-open">{g.openCount} open</span>
+          : <StatusChip status="completed" />,
     },
   ]
+
+  const subtitle =
+    view === 'daily'
+      ? 'Per-day payable, fees and settled-vs-remaining'
+      : openGroup
+        ? `${fmtInt(openGroup.currencies.length)} settlement${openGroup.currencies.length === 1 ? '' : 's'} — one per currency`
+        : data
+          ? `${fmtInt(isAdmin ? groups.length : visibleItems.length)} ${isAdmin ? 'merchant' + (groups.length === 1 ? '' : 's') : 'settlement' + (visibleItems.length === 1 ? '' : 's')}`
+          : ' '
 
   const dailyUuid = isAdmin ? merchantUuid : user.merchant_uuid ?? ''
   const dailyName = isAdmin
@@ -91,9 +103,7 @@ export default function Settlements() {
       <div className="page-head">
         <div>
           <h1>Settlements</h1>
-          <div className="sub">
-            {view === 'daily' ? 'Per-day payable, fees and settled-vs-remaining' : data ? `${fmtInt(data.items.length)} settlements` : ' '}
-          </div>
+          <div className="sub">{subtitle}</div>
         </div>
         <div className="head-actions">
           <div className="seg">
@@ -120,118 +130,113 @@ export default function Settlements() {
           <DailySettlementRecords key={dailyUuid} merchantUuid={dailyUuid} merchantName={dailyName} />
         )
       ) : isAdmin ? (
-      <div className="card">
-        <div className="filter-bar">
-          <select
-            className="select"
-            style={{ maxWidth: 240 }}
-            value={merchantUuid}
-            onChange={(e) => setMerchantUuid(e.target.value)}
-          >
-            <option value="">All merchants</option>
-            {(merchants.data?.items ?? []).map((m) => (
-              <option key={m.merchant_uuid} value={m.merchant_uuid}>{m.name}</option>
-            ))}
-          </select>
-          <select className="select" value={currency} onChange={(e) => setCurrency(e.target.value)}>
-            <option value="">All currencies</option>
-            {CURRENCIES.map((c) => (
-              <option key={c} value={c}>{c}</option>
-            ))}
-          </select>
-          <input
-            className="input"
-            style={{ maxWidth: 240 }}
-            placeholder="Search confirmation code…"
-            value={code}
-            onChange={(e) => setCode(e.target.value)}
-          />
-        </div>
-        <DataTable
-          columns={cols}
-          rows={data?.items ?? []}
-          rowKey={(s) => s.settlement_uuid}
-          loading={loading}
-          onRowClick={(s) => navigate(`/settlements/${s.settlement_uuid}`)}
-          empty={
-            <EmptyState
-              title="No settlements yet"
-              hint="Generate one from a merchant page"
+        openGroup ? (
+          <div className="stack">
+            <div className="drill-head">
+              <button className="btn sm" onClick={() => setOpenMerchant(null)}>← All merchants</button>
+              <h2 className="drill-title">{openGroup.merchant_name}</h2>
+            </div>
+            <SettlementCurrencyView key={openGroup.merchant_uuid} settlements={openGroup.settlements} />
+          </div>
+        ) : (
+          <div className="card">
+            <div className="filter-bar">
+              <input
+                className="input"
+                style={{ maxWidth: 280 }}
+                placeholder="Search merchant…"
+                value={q}
+                onChange={(e) => setQ(e.target.value)}
+              />
+            </div>
+            <DataTable
+              columns={merchantCols}
+              rows={filteredGroups}
+              rowKey={(g) => g.merchant_uuid}
+              loading={loading}
+              onRowClick={(g) => setOpenMerchant(g.merchant_uuid)}
+              empty={<EmptyState title={q ? 'No matches' : 'No settlements yet'} hint={q ? 'Try a different search' : 'Upload transactions for a configured merchant'} />}
             />
-          }
-        />
-      </div>
+          </div>
+        )
       ) : (
-        <MerchantSettlementReport settlements={data?.items ?? []} loading={loading} />
+        <SettlementCurrencyView settlements={visibleItems} loading={loading} merchantView />
       )}
     </div>
   )
 }
 
-/** Merchant view: no list to click through — show a settlement report directly,
- *  narrowed by currency + date. The currency picker selects which report; the
- *  date range keeps only settlements whose window overlaps it. */
-function MerchantSettlementReport({ settlements, loading }: { settlements: Settlement[]; loading: boolean }) {
-  const [currency, setCurrency] = useState('')
-  const [dateFrom, setDateFrom] = useState('')
-  const [dateTo, setDateTo] = useState('')
+/** One card per currency for a single merchant. Pick a currency → its settlement
+ *  report renders below. Used by the admin drill-down and the merchant's own view. */
+function SettlementCurrencyView({
+  settlements,
+  loading,
+  merchantView,
+}: {
+  settlements: Settlement[]
+  loading?: boolean
+  merchantView?: boolean
+}) {
+  // one running settlement per currency (keep the latest if there's ever more).
+  const byCcy = useMemo(() => {
+    const m = new Map<string, Settlement>()
+    for (const s of settlements) {
+      const cur = m.get(s.currency)
+      if (!cur || s.window_end > cur.window_end) m.set(s.currency, s)
+    }
+    return [...m.values()].sort((a, b) => a.currency.localeCompare(b.currency))
+  }, [settlements])
 
-  const currencies = useMemo(
-    () => [...new Set(settlements.map((s) => s.currency))].sort(),
-    [settlements],
-  )
+  const [ccy, setCcy] = useState('')
+  const selected = byCcy.find((s) => s.currency === ccy) ?? byCcy[0] ?? null
 
-  const filtered = useMemo(() => {
-    return settlements
-      .filter((s) => {
-        if (currency && s.currency !== currency) return false
-        const wStart = s.window_start.slice(0, 10)
-        const wEnd = s.window_end.slice(0, 10)
-        if (dateFrom && wEnd < dateFrom) return false
-        if (dateTo && wStart > dateTo) return false
-        return true
-      })
-      .sort((a, b) => b.window_end.localeCompare(a.window_end))
-  }, [settlements, currency, dateFrom, dateTo])
-
-  const selected = filtered[0] ?? null
-  const hasFilters = Boolean(currency || dateFrom || dateTo)
+  if (loading) {
+    return <div className="card" style={{ padding: 32, textAlign: 'center', color: 'var(--ink-2)' }}>Loading settlements…</div>
+  }
+  if (byCcy.length === 0) {
+    return <EmptyState title="No settlement to show" hint="Settlements appear here once transactions are uploaded" />
+  }
 
   return (
     <div className="stack">
-      <div className="card">
-        <div className="filter-bar">
-          <select className="select" style={{ maxWidth: 200 }} value={currency} onChange={(e) => setCurrency(e.target.value)}>
-            <option value="">All currencies</option>
-            {currencies.map((c) => (
-              <option key={c} value={c}>{c}</option>
-            ))}
-          </select>
-          <span className="dim small">From</span>
-          <input className="input sm" type="date" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)} />
-          <span className="dim small">to</span>
-          <input className="input sm" type="date" value={dateTo} onChange={(e) => setDateTo(e.target.value)} />
-          {hasFilters && (
-            <button className="btn sm" onClick={() => { setCurrency(''); setDateFrom(''); setDateTo('') }}>Clear</button>
-          )}
-          {filtered.length > 1 && (
-            <span className="dim small" style={{ marginLeft: 'auto' }}>
-              Showing the latest of {fmtInt(filtered.length)} — pick a currency or narrow the dates to see another
-            </span>
-          )}
-        </div>
+      <div className="ccy-card-row" data-tour={merchantView ? 'm-settle-filters' : undefined}>
+        {byCcy.map((s) => (
+          <button
+            key={s.settlement_uuid}
+            type="button"
+            className={`ccy-settle-card${selected?.currency === s.currency ? ' on' : ''}`}
+            onClick={() => setCcy(s.currency)}
+          >
+            <div className="ccy-settle-top">
+              <span className="ccy-tag">{s.currency}</span>
+              <StatusChip status={s.state} />
+            </div>
+            <div className="ccy-settle-net"><MoneyCell minor={s.net_payout_minor} currency={s.currency} /></div>
+            <div className="dim small nowrap">{fmtDate(s.window_start)} → {fmtDate(s.window_end)}</div>
+          </button>
+        ))}
       </div>
 
-      {loading ? (
-        <div className="card" style={{ padding: 32, textAlign: 'center', color: 'var(--ink-2)' }}>Loading settlements…</div>
-      ) : selected ? (
-        <SettlementDetailPage key={selected.settlement_uuid} uuid={selected.settlement_uuid} embedded />
-      ) : (
-        <EmptyState
-          title="No settlement report to show"
-          hint={hasFilters ? 'No settlement matches these filters' : 'Settlements will appear here once generated'}
-        />
+      {selected && (
+        <div data-tour={merchantView ? 'm-settle-report' : undefined}>
+          <SettlementDetailPage key={selected.settlement_uuid} uuid={selected.settlement_uuid} embedded />
+        </div>
       )}
+    </div>
+  )
+}
+
+function NetStack({ rows }: { rows: { currency: string; minor: number }[] }) {
+  if (rows.length === 0) return <span className="dim">—</span>
+  const sorted = [...rows].sort((a, b) => a.currency.localeCompare(b.currency))
+  return (
+    <div className="ccy-stack">
+      {sorted.map((r) => (
+        <Fragment key={r.currency}>
+          <span className="ccy-tag">{r.currency}</span>
+          <span className={`money${r.minor < 0 ? ' neg' : ''}`}>{fmtMoney(r.minor, r.currency)}</span>
+        </Fragment>
+      ))}
     </div>
   )
 }

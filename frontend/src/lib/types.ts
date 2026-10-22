@@ -72,6 +72,8 @@ export interface Merchant {
   txn_count: number
   quarantined_count?: number
   captured_minor_total: CurrencyAmount[]
+  fee_schedule?: FeeSchedule | null
+  has_login?: boolean
 }
 
 export interface FeeSchedule {
@@ -277,7 +279,6 @@ export interface SettlementDetail {
   counts: { paid: number; declined: number; refunds: number; chargebacks: number }
   breakdown: SettlementBreakdown
   fee_schedule?: FeeSchedule
-  usdc: { rate: string; amount: string }
   items_count: number
 }
 
@@ -505,4 +506,100 @@ export interface UploadResult {
   stats: UploadStats
   integrity: UploadIntegrity
   status: AdminStatus
+  auto_settlements?: AutoSettlements
 }
+
+export interface AutoSettlements {
+  generated: number
+  appended?: number
+  merged?: number
+  existing: number
+  skipped: number
+}
+
+// ---- Insights (country-level portfolio metrics) ----
+export interface CountryInsight {
+  country: string
+  transactions: number
+  accepted: number
+  declined: number
+  refunds: number
+  chargebacks: number
+  acceptance_rate: number | null
+  top_brand: string | null
+  brands: { brand: string; count: number }[]
+  captured: { currency: string; minor: number }[]
+}
+
+export interface DailyPoint {
+  date: string
+  accepted: number
+  declined: number
+  acceptance_rate: number | null
+}
+
+export interface CountryInsights {
+  currencies: string[]
+  daily: DailyPoint[]
+  totals: {
+    countries: number
+    transactions: number
+    accepted: number
+    declined: number
+    acceptance_rate: number | null
+  }
+  countries: CountryInsight[]
+}
+
+// ---- Insights ML layer ----
+export interface MLDriver { factor: string; pp: number }
+export interface MLCountry {
+  expected_approval: number
+  actual_approval: number
+  gap_pp: number
+  drivers: MLDriver[]
+  recover_txns?: number
+  recover_minor?: number
+}
+export interface MLAnomaly {
+  country: string; z: number; transactions: number
+  actual_approval: number; expected_approval: number
+  direction: 'under' | 'over'
+}
+export interface MLCluster { name: string; approval: number; countries: string[]; size: number }
+export interface MLInsights {
+  available: boolean
+  reason?: string
+  model?: { type: string; auc: number; n: number; features: string[] }
+  countries?: Record<string, MLCountry>
+  anomalies?: MLAnomaly[]
+  recoverable?: {
+    target_approval: number
+    basis: string
+    recover_txns: number
+    by_currency: { currency: string; minor: number }[]
+    segments: { country: string; currency: string; current_rate: number; recover_txns: number; recover_minor: number }[]
+  }
+  clusters?: MLCluster[]
+}
+
+// ---- Insights: issuers & merchants ----
+export interface IssuerBin {
+  bin: string; brand: string; transactions: number
+  accepted: number; declined: number; acceptance_rate: number | null
+}
+export interface IssuerBank {
+  bank: string; transactions: number; accepted: number; declined: number
+  acceptance_rate: number | null; top_brand: string | null; bin_count: number
+  captured: { currency: string; minor: number }[]
+  bins: IssuerBin[]
+}
+export interface IssuersResponse {
+  available: boolean; banks: IssuerBank[]; total_banks: number; truncated: boolean
+}
+export interface MerchantInsight {
+  merchant_uuid: string; name: string; transactions: number
+  accepted: number; declined: number; acceptance_rate: number | null
+  captured: { currency: string; minor: number }[]
+}
+export interface MerchantsResponse { merchants: MerchantInsight[] }

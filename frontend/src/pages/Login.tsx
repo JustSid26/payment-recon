@@ -7,9 +7,14 @@ type Role = 'merchant' | 'admin'
 type Mode = 'login' | 'set-password'
 
 const DEMO: Record<Role, { email: string; password: string; sub: string }> = {
-  admin: { email: 'admin@transactworld.com', password: 'demo123', sub: 'CoreServices operations' },
+  admin: { email: 'admin@coreservices.io', password: 'demo123', sub: 'CoreServices operations' },
   merchant: { email: 'merchant@canamoney.com', password: 'demo123', sub: 'CANAMONEY EXCHANGE LTD.' },
 }
+
+// The demo-credentials shortcut only belongs on the demo box / local dev — never on
+// a client production deployment.
+const DEMO_HOSTS = ['app.paymentrecon.site', 'localhost', '127.0.0.1']
+const SHOW_DEMO = typeof window !== 'undefined' && DEMO_HOSTS.includes(window.location.hostname)
 
 function PasswordInput({
   id, value, onChange, placeholder, autoComplete, onEnter,
@@ -102,7 +107,7 @@ export default function Login() {
   }
 
   const doSetPassword = async () => {
-    if (password.length < 6) return setError('Password must be at least 6 characters.')
+    if (password.length < 8) return setError('Password must be at least 8 characters.')
     if (password !== confirm) return setError('Passwords do not match.')
     setBusy(true)
     setError(null)
@@ -198,7 +203,7 @@ export default function Login() {
               <div className="field">
                 <label htmlFor="new-password">New password</label>
                 <PasswordInput id="new-password" value={password} onChange={setPassword}
-                  autoComplete="new-password" placeholder="At least 6 characters" />
+                  autoComplete="new-password" placeholder="At least 8 characters" />
               </div>
               <div className="field">
                 <label htmlFor="confirm-password">Confirm password</label>
@@ -248,22 +253,24 @@ export default function Login() {
           )}
         </form>
 
-        <button
-          type="button"
-          className="demo-chip"
-          disabled={busy}
-          onClick={() => {
-            reset()
-            const d = DEMO[role]
-            setIdentifier(d.email)
-            setPassword(d.password)
-            void doLogin(d.email, d.password)
-          }}
-        >
-          <div className="t">Use {isMerchant ? 'merchant' : 'admin'} demo</div>
-          <div className="s">{DEMO[role].email}</div>
-          <div className="s">{DEMO[role].sub}</div>
-        </button>
+        {SHOW_DEMO && (
+          <button
+            type="button"
+            className="demo-chip"
+            disabled={busy}
+            onClick={() => {
+              reset()
+              const d = DEMO[role]
+              setIdentifier(d.email)
+              setPassword(d.password)
+              void doLogin(d.email, d.password)
+            }}
+          >
+            <div className="t">Use {isMerchant ? 'merchant' : 'admin'} demo</div>
+            <div className="s">{DEMO[role].email}</div>
+            <div className="s">{DEMO[role].sub}</div>
+          </button>
+        )}
       </div>
     </div>
   )

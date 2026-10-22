@@ -1187,12 +1187,6 @@ function StatementView({ s, counts, dayPay }: { s: SettlementDetail; counts: Set
       </table>
 
       <div className="statement-foot">
-        <div className="usdc">
-          <span>
-            USDC conversion <span className="dim">@ rate {s.usdc.rate}</span>
-          </span>
-          <b>{Number(s.usdc.amount).toLocaleString('en-US', { minimumFractionDigits: 2 })} USDC</b>
-        </div>
         <div className="dim">
           Statement covers {fmtInt(s.items_count)} settled items · counts: {fmtInt(counts.paid)} paid,{' '}
           {fmtInt(counts.declined)} declined, {fmtInt(counts.refunds)} refunds

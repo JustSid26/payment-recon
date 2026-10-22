@@ -103,6 +103,7 @@ export default function MerchantDetailPage() {
   const [genCcy, setGenCcy] = useState('')
   const [genStart, setGenStart] = useState('')
   const [genEnd, setGenEnd] = useState('')
+  const [genCode, setGenCode] = useState('')
   const [genBusy, setGenBusy] = useState(false)
   const [genMsg, setGenMsg] = useState<string | null>(null)
   const [genResults, setGenResults] = useState<GenResult[] | null>(null)
@@ -118,6 +119,7 @@ export default function MerchantDetailPage() {
     setGenCcy(currencies.length > 1 ? 'ALL' : currencies[0] ?? 'USD')
     setGenStart(iso(start))
     setGenEnd(iso(today))
+    setGenCode('')
     setGenMsg(null)
     setGenResults(null)
     setShowGen(true)
@@ -131,7 +133,12 @@ export default function MerchantDetailPage() {
     try {
       const res = await api<SettlementDetail | GenerateSkipped>('/api/settlements/generate', {
         method: 'POST',
-        body: { merchant_uuid: uuid, currency, window_start: genStart, window_end: genEnd },
+        body: {
+          merchant_uuid: uuid, currency, window_start: genStart, window_end: genEnd,
+          // custom code only when settling a single currency — one code can't be
+          // reused across the per-currency settlements of an "All currencies" run.
+          confirmation_code: genCcy === 'ALL' ? undefined : (genCode.trim() || undefined),
+        },
       })
       if ('skipped' in res && res.skipped) return { currency, status: 'skipped', detail: res.reason }
       const s = res as SettlementDetail
@@ -184,14 +191,16 @@ export default function MerchantDetailPage() {
   const [showFee, setShowFee] = useState(false)
 
   const saveFee = async (rates: FeeRates) => {
-    const res = await api<{ transactions_posted: number }>(
+    const res = await api<{ transactions_posted: number; auto_settlements?: { generated: number; appended?: number } }>(
       `/api/merchants/${uuid}/fee-schedule`,
       { method: 'POST', body: rates },
     )
+    const gen = (res.auto_settlements?.generated ?? 0) + (res.auto_settlements?.appended ?? 0)
+    const settled = gen > 0 ? ` · ${fmtInt(gen)} settlement${gen === 1 ? '' : 's'} updated` : ''
     toastSuccess(
-      res.transactions_posted > 0
+      (res.transactions_posted > 0
         ? `Fees saved — ${fmtInt(res.transactions_posted)} transactions posted to the ledger`
-        : 'Fee schedule saved',
+        : 'Fee schedule saved') + settled,
     )
     reloadMerchant()
     settlements.reload()
@@ -309,7 +318,7 @@ export default function MerchantDetailPage() {
               )}
             </div>
           </div>
-          <div className="head-actions">
+          <div className="head-actions" data-tour="md-generate">
             <button className="btn primary" onClick={openGen}>＋ Generate settlement</button>
           </div>
         </div>
@@ -356,7 +365,7 @@ export default function MerchantDetailPage() {
       {/* grid-2: fee schedule + reserve statement */}
       <div className="grid grid-2">
         {/* Fee schedule */}
-        <div className="card">
+        <div className="card" data-tour="md-fees">
           <div className="card-title">
             Fee schedule
             <button className="btn" style={{ padding: '4px 10px', fontSize: 12 }} onClick={() => setShowFee(true)}>
@@ -505,6 +514,24 @@ export default function MerchantDetailPage() {
               capture) are paid out; anything not yet matured in the range is skipped, with the date it becomes settleable.
             </div>
           </div>
+
+          {genCcy !== 'ALL' && (
+            <div className="field">
+              <label>Confirmation code <span className="dim">(optional)</span></label>
+              <input
+                className="input"
+                type="text"
+                placeholder="Auto-generated if left blank"
+                value={genCode}
+                onChange={(e) => setGenCode(e.target.value)}
+              />
+              <div className="dim small" style={{ marginTop: 6, lineHeight: 1.5 }}>
+                The merchant-facing code quoted on the payout report. Leave blank for an
+                auto code (e.g. <code>TW-9F03A66ABB</code>). Per-day codes append the date —
+                {' '}<code>{(genCode.trim().toUpperCase().replace(/[^A-Z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 40)) || 'ACME-2026-08'}-{(genEnd || '2026-08-11').replace(/-/g, '')}</code>.
+              </div>
+            </div>
+          )}
 
           {genResults && (
             <div className="stack" style={{ gap: 6, marginTop: 14 }}>

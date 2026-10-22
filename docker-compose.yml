@@ -27,6 +27,10 @@ services:
     environment:
       TW_DSN: postgresql://tw:${DB_PASSWORD}@db:5432/twledger
       TW_JWT_SECRET: ${TW_JWT_SECRET}
+      # Production admin login (unset on the demo box → seeded demo accounts stay).
+      TW_ADMIN_EMAIL: ${TW_ADMIN_EMAIL:-}
+      TW_ADMIN_PASSWORD: ${TW_ADMIN_PASSWORD:-}
+      TW_ADMIN_NAME: ${TW_ADMIN_NAME:-}
       # Gmail API mailer — empty by default (mailer stays dormant). Fill these in
       # the VPS .env and `docker compose up -d backend` to enable payout emails.
       TW_GMAIL_CLIENT_ID: ${TW_GMAIL_CLIENT_ID:-}

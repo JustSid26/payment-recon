@@ -1,39 +1,57 @@
 import { useEffect, useState } from 'react'
 import { api, ApiError } from '../lib/api'
 import { useApi } from '../lib/useApi'
-import { LoadingBlock, toastError, toastSuccess } from '../components/ui'
-import type { MailSettings, MailSendResult } from '../lib/types'
+import { LoadingBlock, StatusChip, toastError, toastSuccess } from '../components/ui'
+import { ADMIN_TOUR, openTour } from '../lib/tour'
+import { fmtInt } from '../lib/money'
+import type { MailSettings, MailSendResult, Merchant } from '../lib/types'
+
+// The subset of tour steps that map to an actual page, with their step index.
+const TOUR_PAGES = ADMIN_TOUR.map((s, i) => ({ page: s.page, i })).filter(
+  (x): x is { page: string; i: number } => Boolean(x.page),
+)
 
 export default function Settings() {
   const { data, loading, reload } = useApi(() => api<MailSettings>('/api/settings/mail'), [])
-
-  // Editable form state, seeded from the server config once it loads.
-  const [fromAddr, setFromAddr] = useState('')
-  const [enabled, setEnabled] = useState(true)
-  const [clientId, setClientId] = useState('')
-  const [clientSecret, setClientSecret] = useState('')
-  const [refreshToken, setRefreshToken] = useState('')
-  const [saving, setSaving] = useState(false)
+  const merchants = useApi(() => api<{ items: Merchant[] }>('/api/merchants'), [])
 
   const [testTo, setTestTo] = useState('')
   const [testing, setTesting] = useState(false)
   const [testResult, setTestResult] = useState<MailSendResult | null>(null)
   const [connecting, setConnecting] = useState(false)
+  const [busy, setBusy] = useState(false)
 
-  useEffect(() => {
-    if (!data) return
-    setFromAddr(data.config.TW_MAIL_FROM.value ?? '')
-    setEnabled(!data.status.disabled)
-    setClientId(data.config.TW_GMAIL_CLIENT_ID.value ?? '')
-    setClientSecret('')
-    setRefreshToken('')
-  }, [data])
+  // Add-a-merchant form.
+  const [mName, setMName] = useState('')
+  const [mId, setMId] = useState('')
+  const [mEmail, setMEmail] = useState('')
+  const [mPass, setMPass] = useState('')
+  const [addingMerchant, setAddingMerchant] = useState(false)
+
+  const addMerchant = async () => {
+    if (!mId.trim()) return toastError('Enter a merchant ID')
+    if (mPass.length < 8) return toastError('Password must be at least 8 characters')
+    setAddingMerchant(true)
+    try {
+      const res = await api<{ member_id: string; name: string }>('/api/merchants/create', {
+        method: 'POST',
+        body: { member_id: mId.trim(), password: mPass, name: mName.trim() || undefined, email: mEmail.trim() || undefined },
+      })
+      toastSuccess(`Merchant "${res.name}" created — they can sign in with ID ${res.member_id} + the password`)
+      setMName(''); setMId(''); setMEmail(''); setMPass('')
+      merchants.reload()
+    } catch (e) {
+      toastError(e instanceof ApiError ? e.message : 'Could not create merchant')
+    } finally {
+      setAddingMerchant(false)
+    }
+  }
 
   // Handle the return from the Google "Connect Gmail" redirect.
   useEffect(() => {
     const p = new URLSearchParams(window.location.search)
     if (p.get('mail_connected')) {
-      toastSuccess('Gmail connected — the refresh token was saved and sending is enabled')
+      toastSuccess('Gmail connected — payout emails are ready to send')
       reload()
     } else if (p.get('mail_error')) {
       toastError(`Gmail connect failed: ${p.get('mail_error')}`)
@@ -50,35 +68,21 @@ export default function Settings() {
       const res = await api<{ auth_url: string }>('/api/settings/mail/oauth/start')
       window.location.href = res.auth_url
     } catch (e) {
-      toastError(e instanceof ApiError ? e.message : 'Could not start Google connect — save the client id/secret first')
+      toastError(e instanceof ApiError ? e.message : 'Could not start Google connect — check the server Gmail app is configured')
       setConnecting(false)
     }
   }
 
-  const secretSet = (k: 'TW_GMAIL_CLIENT_SECRET' | 'TW_GMAIL_REFRESH_TOKEN') =>
-    data?.config[k].set ?? false
-
-  const save = async () => {
-    setSaving(true)
+  const disconnect = async () => {
+    setBusy(true)
     try {
-      // Secrets are write-only: only send them when the admin typed a new value,
-      // otherwise omit so the stored one is kept.
-      const body: Record<string, unknown> = {
-        from_addr: fromAddr.trim(),
-        enabled,
-        client_id: clientId.trim(),
-      }
-      if (clientSecret.trim()) body.client_secret = clientSecret.trim()
-      if (refreshToken.trim()) body.refresh_token = refreshToken.trim()
-      await api<MailSettings>('/api/settings/mail', { method: 'PUT', body })
-      toastSuccess('Mail settings saved')
-      setClientSecret('')
-      setRefreshToken('')
+      await api('/api/settings/mail', { method: 'PUT', body: { refresh_token: '', enabled: false } })
+      toastSuccess('Gmail disconnected — payout emails are off')
       reload()
     } catch (e) {
-      toastError(e instanceof ApiError ? e.message : 'Could not save settings')
+      toastError(e instanceof ApiError ? e.message : 'Could not disconnect')
     } finally {
-      setSaving(false)
+      setBusy(false)
     }
   }
 
@@ -115,6 +119,93 @@ export default function Settings() {
         </div>
       </div>
 
+      <div className="card">
+        <div className="card-title">Product tour &amp; help</div>
+        <div className="settings-body">
+          <div className="tour-help-head">
+            <div className="dim small">
+              New here, or need a refresher? Take the guided tour of the whole console, or jump
+              straight to the page you want to know about.
+            </div>
+            <button className="btn primary" onClick={() => openTour(0)}>🧭 Take the full tour</button>
+          </div>
+          <div className="tour-pages">
+            {TOUR_PAGES.map(({ page, i }) => (
+              <button key={page} className="tour-page-btn" onClick={() => openTour(i)}>
+                <span className="tp-name">{page}</span>
+                <span className="tp-go material-symbols-outlined">arrow_forward</span>
+              </button>
+            ))}
+          </div>
+        </div>
+      </div>
+
+      <div className="card">
+        <div className="card-title">Add a merchant</div>
+        <div className="settings-body">
+          <div className="dim small" style={{ marginBottom: 16 }}>
+            Create a merchant login directly — set their ID and a password. They sign in with the
+            merchant ID (or email) + this password; their fee schedule and data are added later via
+            Upload &amp; Verify. No upload needed first.
+          </div>
+          <div className="settings-form">
+            <div className="field">
+              <label>Merchant name <span className="dim">· optional</span></label>
+              <input className="input" placeholder="e.g. Acme Payments Ltd." value={mName} onChange={(e) => setMName(e.target.value)} />
+            </div>
+            <div className="field">
+              <label>Merchant ID</label>
+              <input className="input" placeholder="e.g. ACME01 — they log in with this" value={mId} onChange={(e) => setMId(e.target.value)} />
+            </div>
+            <div className="field">
+              <label>Email <span className="dim">· optional (also works as a login)</span></label>
+              <input className="input" placeholder="merchant@company.com" value={mEmail} onChange={(e) => setMEmail(e.target.value)} />
+            </div>
+            <div className="field">
+              <label>Password <span className="dim">· at least 8 characters</span></label>
+              <input className="input" type="text" autoComplete="off" placeholder="the password you'll give them" value={mPass} onChange={(e) => setMPass(e.target.value)} />
+            </div>
+            <div className="head-actions" style={{ marginTop: 4 }}>
+              <button className="btn primary" onClick={() => void addMerchant()} disabled={addingMerchant}>
+                {addingMerchant ? 'Creating…' : '+ Create merchant login'}
+              </button>
+            </div>
+          </div>
+
+          <div className="merchant-list-head">
+            <span className="card-title" style={{ margin: 0 }}>Existing merchants</span>
+            <span className="dim small">
+              {merchants.data ? `${fmtInt(merchants.data.items.length)} total` : ''}
+            </span>
+          </div>
+          {merchants.loading && !merchants.data ? (
+            <div className="dim small">Loading merchants…</div>
+          ) : (merchants.data?.items.length ?? 0) === 0 ? (
+            <div className="dim small">No merchants yet — add one above, or upload data.</div>
+          ) : (
+            <div className="merchant-list">
+              <div className="merchant-row head">
+                <span>Merchant</span><span>Merchant ID</span><span>Email</span>
+                <span>Status</span><span>Login</span>
+              </div>
+              {merchants.data!.items.map((m) => (
+                <div className="merchant-row" key={m.merchant_uuid}>
+                  <span className="mr-name"><b>{m.name}</b></span>
+                  <span className="mono small">{m.member_id ?? '—'}</span>
+                  <span className="small dim">{m.email ?? '—'}</span>
+                  <StatusChip status={m.status} />
+                  <span>
+                    {m.has_login
+                      ? <span className="preset-pill same">● set</span>
+                      : <span className="preset-pill">no password</span>}
+                  </span>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      </div>
+
       {loading && !data && <LoadingBlock label="Loading settings…" />}
 
       {data && (
@@ -136,84 +227,28 @@ export default function Settings() {
             <div className="card-title">Sending account</div>
             <div className="settings-body">
               <div className="dim small" style={{ marginBottom: 16 }}>
-                Emails send through the Gmail API. Enter the sender address and its OAuth
-                credentials (client ID/secret + refresh token minted for that mailbox).
-                Saved values override the server env vars — no redeploy needed.
+                Payout confirmations send from a connected Gmail account. Click{' '}
+                <b>Connect Gmail</b>, sign in and approve — that's it. Nothing to copy or paste.
               </div>
 
-              <div className="settings-form">
-              <div className="field">
-                <label>From address</label>
-                <input
-                  className="input"
-                  placeholder="CoreServices &lt;payouts@yourdomain.com&gt;"
-                  value={fromAddr}
-                  onChange={(e) => setFromAddr(e.target.value)}
-                />
-              </div>
-
-              <label className="switch" style={{ marginTop: 4 }}>
-                <input type="checkbox" checked={enabled} onChange={(e) => setEnabled(e.target.checked)} />
-                <span className="track"><span className="thumb" /></span>
-                <span className="switch-label">Sending enabled</span>
-              </label>
-
-              <div className="field">
-                <label>Gmail OAuth client ID</label>
-                <input
-                  className="input"
-                  placeholder="xxxxxxxx.apps.googleusercontent.com"
-                  value={clientId}
-                  onChange={(e) => setClientId(e.target.value)}
-                />
-              </div>
-
-              <div className="field">
-                <label>
-                  Gmail OAuth client secret{' '}
-                  <span className="dim">{secretSet('TW_GMAIL_CLIENT_SECRET') ? '· saved' : '· not set'}</span>
-                </label>
-                <input
-                  className="input"
-                  type="password"
-                  autoComplete="new-password"
-                  placeholder={secretSet('TW_GMAIL_CLIENT_SECRET') ? 'Leave blank to keep current' : 'Paste client secret'}
-                  value={clientSecret}
-                  onChange={(e) => setClientSecret(e.target.value)}
-                />
-              </div>
-
-              <div className="field">
-                <label>
-                  Gmail refresh token{' '}
-                  <span className="dim">{secretSet('TW_GMAIL_REFRESH_TOKEN') ? '· saved' : '· not set — use “Connect Gmail”'}</span>
-                </label>
-                <input
-                  className="input"
-                  type="password"
-                  autoComplete="new-password"
-                  placeholder={secretSet('TW_GMAIL_REFRESH_TOKEN') ? 'Leave blank to keep current' : 'Paste, or click Connect Gmail →'}
-                  value={refreshToken}
-                  onChange={(e) => setRefreshToken(e.target.value)}
-                />
-              </div>
-
-              <div className="callout" style={{ marginTop: 4 }}>
-                <span>
-                  <b>Easiest:</b> with the client id/secret saved, click <b>Connect Gmail</b> to authorize the
-                  sending account with Google — the refresh token is captured automatically (no copy-paste).
-                </span>
-              </div>
-
-              <div className="head-actions" style={{ marginTop: 4, gap: 8 }}>
-                <button className="btn primary" onClick={() => void save()} disabled={saving}>
-                  {saving ? 'Saving…' : 'Save settings'}
-                </button>
-                <button className="btn" onClick={() => void connectGmail()} disabled={connecting || saving}>
+              {status?.configured ? (
+                <div className="head-actions" style={{ gap: 8, alignItems: 'center' }}>
+                  <span className="pay-pill paid">● Connected</span>
+                  <span className="dim small">Sending from <b>{status.from}</b></span>
+                  <div style={{ marginLeft: 'auto', display: 'flex', gap: 8 }}>
+                    <button className="btn" onClick={() => void connectGmail()} disabled={connecting || busy}>
+                      {connecting ? 'Redirecting…' : '🔗 Reconnect / switch account'}
+                    </button>
+                    <button className="btn" onClick={() => void disconnect()} disabled={busy || connecting}>
+                      {busy ? 'Disconnecting…' : 'Disconnect'}
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                <button className="btn primary" onClick={() => void connectGmail()} disabled={connecting}>
                   {connecting ? 'Redirecting…' : '🔗 Connect Gmail'}
                 </button>
-                </div>
-              </div>
+              )}
             </div>
           </div>
 
@@ -237,7 +272,7 @@ export default function Settings() {
                   className="btn"
                   onClick={() => void sendTest()}
                   disabled={testing || !testTo.trim() || !status?.configured}
-                  title={status?.configured ? '' : 'Configure and save the sending account first'}
+                  title={status?.configured ? '' : 'Connect Gmail first'}
                 >
                   {testing ? 'Sending…' : '✉ Send test'}
                 </button>

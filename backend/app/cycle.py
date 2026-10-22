@@ -142,6 +142,89 @@ def run_cycle(conn: psycopg.Connection, *, cutoff: datetime | None = None,
     }
 
 
+def _pairs_with_multiple_settlements(conn: psycopg.Connection,
+                                     ids: set[int] | None) -> set[tuple[int, str]]:
+    """merchant×currency pairs that carry more than one non-cancelled settlement —
+    leftovers (from before the one-account model, or older per-upload generation)
+    that should be merged into a single running settlement even if nothing new
+    arrived."""
+    cur = conn.cursor()
+    cur.execute(
+        """SELECT merchant_id, currency FROM settlements
+            WHERE state <> 'cancelled'
+            GROUP BY merchant_id, currency HAVING COUNT(*) > 1""")
+    pairs = {(r["merchant_id"], r["currency"]) for r in cur.fetchall()}
+    if ids is not None:
+        pairs = {(m, c) for (m, c) in pairs if m in ids}
+    return pairs
+
+
+def generate_pending(conn: psycopg.Connection, *, cutoff: datetime | None = None,
+                     generated_by: str = "auto", merchant_ids: list[int] | None = None) -> dict:
+    """Maintain exactly ONE running settlement per merchant×currency — a per-merchant
+    account that new uploads APPEND into, rather than a new card per upload.
+
+    This is what makes settlements appear WITHOUT a manual "Generate" click: called
+    right after an import, or right after a fee schedule is applied, for each affected
+    merchant×currency it (1) merges any stray duplicate settlements into the oldest
+    canonical one, then (2) appends the merchant's newly-matured, unsettled
+    transactions into that single settlement (its detail is the day-wise report).
+    Appending re-opens a fully-paid settlement and leaves already-paid days untouched,
+    so a merchant keeps one settlement forever with paid days as history. If no
+    settlement exists yet, one is created. Unconfigured merchants have no ledger
+    events, so they never match.
+
+    `merchant_ids`, when given, restricts work to those merchants (used by the
+    fee-apply hook so configuring one merchant doesn't settle others)."""
+    now = _now()
+    cutoff = cutoff or now
+    if cutoff > now:
+        cutoff = now
+    ids = set(merchant_ids) if merchant_ids is not None else None
+
+    # Pairs with newly-matured unsettled activity, plus any that still carry more
+    # than one settlement (to collapse into one).
+    eligible = {(m, c) for (m, c) in _eligible_pairs(conn, cutoff)
+                if ids is None or m in ids}
+    pairs = eligible | _pairs_with_multiple_settlements(conn, ids)
+
+    # window_start is irrelevant for a first-time backlog-drain (candidate selection
+    # is by settle_after<=cutoff; the stored window is the actual settled span).
+    floor = datetime(2000, 1, 1, tzinfo=timezone.utc)
+    created = appended = merged = existing = skipped = 0
+    for mid, ccy in sorted(pairs):
+        try:
+            # 1. collapse any duplicates into one canonical settlement
+            canon, n_merged = settle_mod.merge_settlements(conn, mid, ccy)
+            if n_merged:
+                merged += 1
+            # 2. append new activity into it — or create the first settlement
+            if canon is None:
+                res = settle_mod.generate(conn, merchant_id=mid, currency=ccy,
+                                          window_start=floor, window_end=cutoff,
+                                          cutoff=cutoff, scope_by_occurred=False,
+                                          generated_by=generated_by)
+                if res.get("skipped"):
+                    skipped += 1
+                elif res.get("existing"):
+                    existing += 1
+                else:
+                    created += 1
+            else:
+                res = settle_mod.append(conn, canon, cutoff=cutoff, generated_by=generated_by)
+                if res.get("appended"):
+                    appended += 1
+                elif res.get("skipped"):
+                    skipped += 1
+                else:
+                    existing += 1
+        except Exception:
+            skipped += 1
+            continue
+    return {"generated": created, "appended": appended, "merged": merged,
+            "existing": existing, "skipped": skipped}
+
+
 def _net(conn: psycopg.Connection, settlement_id: int) -> int:
     cur = conn.cursor()
     cur.execute("SELECT net_payout_minor FROM settlements WHERE id=%s", (settlement_id,))

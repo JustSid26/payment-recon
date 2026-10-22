@@ -117,8 +117,6 @@ def _items_html(ccy: str, items: list[dict], limit: int = 100) -> str:
 
 # ---- attachments: PDF report (mirrors the UI statement) + real .xlsx (no deps) --
 _SYM = {"EUR": "€", "USD": "$", "GBP": "£", "JPY": "¥", "AUD": "A$", "CAD": "C$"}
-_USDC_RATES = {"USD": "1.0000", "EUR": "1.0850", "AUD": "0.6650", "CAD": "0.7350",
-               "GBP": "1.2700", "JPY": "0.0069"}
 _RED = "0.70 0.11 0.09"
 _GRAY = "0.42 0.45 0.50"
 
@@ -161,7 +159,7 @@ def _pdf(content: str) -> bytes:
 
 
 def _pdf_report(merchant: str, ccy: str, code: str, window: str, counts: dict,
-                bd: dict, net_minor: int, fs: dict, usdc: dict, items_count: int) -> bytes:
+                bd: dict, net_minor: int, fs: dict, items_count: int) -> bytes:
     ops: list[str] = []
 
     def esc(s: str) -> str:
@@ -222,9 +220,6 @@ def _pdf_report(merchant: str, ccy: str, code: str, window: str, counts: dict,
     rule(y + 10)
     txt(55, y, "NET PAYOUT", 13, True)
     right(y, _money(net_minor, ccy), 13, True); y -= 26
-    if usdc:
-        txt(50, y, f"USDC conversion @ rate {usdc['rate']}", 9, False, _GRAY)
-        right(y, f"{usdc['amount']} USDC", 10, True); y -= 16
     txt(50, y, f"Statement covers {items_count} settled items · quote code {code} for any query.",
         9, False, _GRAY)
     return _pdf("\n".join(ops))
@@ -303,12 +298,6 @@ def _txn_rows(ccy: str, items: list[dict]) -> list[list]:
     return rows
 
 
-def _usdc(ccy: str, net_minor: int) -> dict:
-    rate = _USDC_RATES.get(ccy, "1.0000")
-    e = exponent(ccy)
-    amount = f"{float(rate) * net_minor / (10 ** e):,.2f}"
-    return {"rate": rate, "amount": amount}
-
 
 def build(conn: psycopg.Connection, settlement_id: int) -> dict | None:
     """Assemble the email (to, subject, html, attachments) or None if not found."""
@@ -359,7 +348,7 @@ def build(conn: psycopg.Connection, settlement_id: int) -> dict | None:
     attachments = [
         (f"settlement-report-{code}.pdf".replace(" ", "_"), "application/pdf",
          _pdf_report(s["merchant_name"], ccy, code, window_full, counts, bd,
-                     int(s["net_payout_minor"]), fs, _usdc(ccy, int(s["net_payout_minor"])), len(items))),
+                     int(s["net_payout_minor"]), fs, len(items))),
         (f"transactions-{code}.xlsx".replace(" ", "_"),
          "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
          _xlsx_bytes(_txn_rows(ccy, items))),
@@ -462,7 +451,7 @@ def build_day(conn: psycopg.Connection, settlement_id: int, day: str) -> dict | 
 </div>"""
     attachments = [
         (f"settlement-report-{code}.pdf".replace(" ", "_"), "application/pdf",
-         _pdf_report(s["merchant_name"], ccy, code, day, counts, bd, net, fs, _usdc(ccy, net), len(items))),
+         _pdf_report(s["merchant_name"], ccy, code, day, counts, bd, net, fs, len(items))),
         (f"transactions-{code}.xlsx".replace(" ", "_"),
          "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
          _xlsx_bytes(_txn_rows(ccy, items))),

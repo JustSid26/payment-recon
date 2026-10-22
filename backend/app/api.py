@@ -24,7 +24,7 @@ from . import mailer as mailer_mod
 from . import settlement_email as settlement_email_mod
 from . import settings_store as settings_store_mod
 
-app = FastAPI(title="Transactworld Ledger API")
+app = FastAPI(title="CoreServices Ledger API")
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"],
                    allow_headers=["*"])
 
@@ -114,7 +114,7 @@ class LoginBody(BaseModel):
     password: str
 
 
-MIN_PASSWORD_LEN = 6
+MIN_PASSWORD_LEN = 8
 
 
 def _resolve_merchant_login(cur, identifier: str):
@@ -333,6 +333,230 @@ def dashboard(user: dict = Depends(current_user)):
                 "integrity": integ, "top_merchants": top, "daily_volume": daily}
 
 
+@app.get("/api/insights/countries")
+def insights_countries(currency: str | None = None, user: dict = Depends(current_user)):
+    """Country-level performance of the card portfolio: per-country transaction
+    counts, accept/decline split, brand mix and captured volume. Merchants see
+    only their own data; admins see the whole book."""
+    from . import ml
+    ctry = ml.country_case("t.country")     # normalise USA/UNITED STATES→US etc., blank→??
+    with get_pool().connection() as conn:
+        cur = conn.cursor()
+        mid = user["merchant_id"] if user["role"] == "merchant" else None
+        p: dict = {"mid": mid, "ccy": currency.upper() if currency else None}
+        filt = ""
+        if mid:
+            filt += " AND t.merchant_id = %(mid)s"
+        if currency:
+            filt += " AND t.currency = %(ccy)s"
+
+        cur.execute(f"""
+            SELECT {ctry} AS country,
+                   COUNT(*) AS total,
+                   COUNT(*) FILTER (WHERE t.status IN ('captured','refunded','partially_refunded')) AS accepted,
+                   COUNT(*) FILTER (WHERE t.status = 'auth_failed') AS declined,
+                   COUNT(*) FILTER (WHERE t.status IN ('refunded','partially_refunded')) AS refunds,
+                   COUNT(*) FILTER (WHERE t.chargeback_minor > 0) AS chargebacks
+              FROM transactions t WHERE TRUE {filt}
+             GROUP BY 1 ORDER BY total DESC""", p)
+        rows = cur.fetchall()
+
+        cur.execute(f"""
+            SELECT {ctry} AS country,
+                   COALESCE(NULLIF(t.payment_brand, ''), '—') AS brand, COUNT(*) AS n
+              FROM transactions t WHERE TRUE {filt}
+             GROUP BY 1, 2""", p)
+        brands: dict = {}
+        for r in cur.fetchall():
+            brands.setdefault(r["country"], []).append({"brand": r["brand"], "count": int(r["n"])})
+
+        cur.execute(f"""
+            SELECT {ctry} AS country, t.currency,
+                   COALESCE(SUM(t.captured_minor), 0) AS captured
+              FROM transactions t
+             WHERE t.status IN ('captured','refunded','partially_refunded') {filt}
+             GROUP BY 1, 2 HAVING SUM(t.captured_minor) > 0
+             ORDER BY captured DESC""", p)
+        vol: dict = {}
+        for r in cur.fetchall():
+            vol.setdefault(r["country"], []).append(
+                {"currency": r["currency"], "minor": int(r["captured"])})
+
+        countries = []
+        for r in rows:
+            c = r["country"]
+            acc, dec = int(r["accepted"]), int(r["declined"])
+            decided = acc + dec
+            blist = sorted(brands.get(c, []), key=lambda x: -x["count"])
+            countries.append({
+                "country": c,
+                "transactions": int(r["total"]),
+                "accepted": acc,
+                "declined": dec,
+                "refunds": int(r["refunds"]),
+                "chargebacks": int(r["chargebacks"]),
+                "acceptance_rate": round(acc / decided, 4) if decided else None,
+                "top_brand": blist[0]["brand"] if blist else None,
+                "brands": blist[:4],
+                "captured": vol.get(c, []),
+            })
+
+        cur.execute(f"""
+            SELECT date_trunc('day', t.occurred_at)::date AS d,
+                   COUNT(*) FILTER (WHERE t.status IN ('captured','refunded','partially_refunded')) AS accepted,
+                   COUNT(*) FILTER (WHERE t.status='auth_failed') AS declined
+              FROM transactions t WHERE TRUE {filt}
+             GROUP BY 1 ORDER BY 1""", p)
+        daily = []
+        for r in cur.fetchall():
+            acc, dec = int(r["accepted"]), int(r["declined"])
+            tot = acc + dec
+            daily.append({"date": str(r["d"]), "accepted": acc, "declined": dec,
+                          "acceptance_rate": round(acc / tot, 4) if tot else None})
+
+        tacc = sum(c["accepted"] for c in countries)
+        tdec = sum(c["declined"] for c in countries)
+        return {
+            "currencies": _distinct_currencies(cur, mid),
+            "daily": daily,
+            "totals": {
+                "countries": len(countries),
+                "transactions": sum(c["transactions"] for c in countries),
+                "accepted": tacc,
+                "declined": tdec,
+                "acceptance_rate": round(tacc / (tacc + tdec), 4) if (tacc + tdec) else None,
+            },
+            "countries": countries,
+        }
+
+
+@app.get("/api/insights/ml")
+def insights_ml(currency: str | None = None, user: dict = Depends(current_user)):
+    """ML layer for Insights: predicted (mix-based) approval + decline drivers per
+    country, statistical anomalies, recoverable-revenue sizing, and market
+    cohorts. Scoped to the merchant for merchant users."""
+    from . import ml
+    with get_pool().connection() as conn:
+        cur = conn.cursor()
+        mid = user["merchant_id"] if user["role"] == "merchant" else None
+        return ml.compute(cur, mid, currency)
+
+
+_APPROVED = ["captured", "refunded", "partially_refunded"]
+_DECIDED = [*_APPROVED, "auth_failed"]
+
+
+@app.get("/api/insights/issuers")
+def insights_issuers(currency: str | None = None, country: str | None = None,
+                     user: dict = Depends(current_user)):
+    """Issuing-bank / BIN performance: per bank (transactions, accept/decline,
+    acceptance, top brand) with its individual BINs nested underneath. Optionally
+    scoped to a single country (its ISO-2 code)."""
+    from . import ml
+    with get_pool().connection() as conn:
+        cur = conn.cursor()
+        mid = user["merchant_id"] if user["role"] == "merchant" else None
+        p = {"mid": mid, "ccy": currency.upper() if currency else None,
+             "country": country.upper() if country else None, "app": _APPROVED, "all": _DECIDED}
+        filt = (" AND merchant_id = %(mid)s" if mid else "") + (" AND currency = %(ccy)s" if currency else "")
+        if country:
+            filt += f" AND {ml.country_case('country')} = %(country)s"
+
+        cur.execute(f"""
+            SELECT COALESCE(NULLIF(issuing_bank,''),'—') bank,
+                   COALESCE(NULLIF(first_six,''),'—') bin,
+                   mode() WITHIN GROUP (ORDER BY COALESCE(NULLIF(payment_brand,''),'—')) brand,
+                   COUNT(*) total,
+                   COUNT(*) FILTER (WHERE status = ANY(%(app)s)) accepted,
+                   COUNT(*) FILTER (WHERE status='auth_failed') declined
+              FROM transactions WHERE status = ANY(%(all)s) {filt}
+             GROUP BY 1,2""", p)
+        rows = cur.fetchall()
+
+        cur.execute(f"""
+            SELECT COALESCE(NULLIF(issuing_bank,''),'—') bank, currency,
+                   COALESCE(SUM(captured_minor),0) captured
+              FROM transactions WHERE status = ANY(%(app)s) {filt}
+             GROUP BY 1,2 HAVING SUM(captured_minor) > 0""", p)
+        capt: dict = {}
+        for r in cur.fetchall():
+            capt.setdefault(r["bank"], []).append({"currency": r["currency"], "minor": int(r["captured"])})
+
+        banks: dict = {}
+        for r in rows:
+            b = banks.setdefault(r["bank"], {"bank": r["bank"], "transactions": 0, "accepted": 0,
+                                             "declined": 0, "bins": [], "_brand": {}})
+            acc, dec, tot = int(r["accepted"]), int(r["declined"]), int(r["total"])
+            b["transactions"] += tot
+            b["accepted"] += acc
+            b["declined"] += dec
+            b["_brand"][r["brand"]] = b["_brand"].get(r["brand"], 0) + tot
+            decided = acc + dec
+            b["bins"].append({"bin": r["bin"], "brand": r["brand"], "transactions": tot,
+                              "accepted": acc, "declined": dec,
+                              "acceptance_rate": round(acc / decided, 4) if decided else None})
+        out = []
+        for b in banks.values():
+            decided = b["accepted"] + b["declined"]
+            b["acceptance_rate"] = round(b["accepted"] / decided, 4) if decided else None
+            b["top_brand"] = max(b["_brand"], key=b["_brand"].get) if b["_brand"] else None
+            b["bin_count"] = len(b["bins"])
+            b["bins"].sort(key=lambda x: -x["transactions"])
+            b["bins"] = b["bins"][:15]
+            b["captured"] = sorted(capt.get(b["bank"], []), key=lambda x: -x["minor"])
+            del b["_brand"]
+            out.append(b)
+        out.sort(key=lambda x: -x["transactions"])
+        top = out[:40]
+        return {"available": len(out) > 0, "banks": top, "total_banks": len(out),
+                "truncated": len(out) > len(top)}
+
+
+@app.get("/api/insights/merchants")
+def insights_merchants(user: dict = Depends(current_user)):
+    """Consolidated per-merchant summary across all currencies (admin: every
+    merchant; merchant: just their own)."""
+    with get_pool().connection() as conn:
+        cur = conn.cursor()
+        mid = user["merchant_id"] if user["role"] == "merchant" else None
+        mfilter = " AND t.merchant_id = %(mid)s" if mid else ""
+        cur.execute(f"""
+            SELECT m.merchant_uuid, m.name, t.currency,
+                   COUNT(*) total,
+                   COUNT(*) FILTER (WHERE t.status = ANY(%(app)s)) accepted,
+                   COUNT(*) FILTER (WHERE t.status='auth_failed') declined,
+                   COALESCE(SUM(t.captured_minor),0) captured
+              FROM transactions t JOIN merchants m ON m.id = t.merchant_id
+             WHERE t.status = ANY(%(all)s) {mfilter}
+             GROUP BY 1,2,3""", {"mid": mid, "app": _APPROVED, "all": _DECIDED})
+        agg: dict = {}
+        for r in cur.fetchall():
+            k = str(r["merchant_uuid"])
+            a = agg.setdefault(k, {"merchant_uuid": k, "name": r["name"], "transactions": 0,
+                                   "accepted": 0, "declined": 0, "cap": {}})
+            a["transactions"] += int(r["total"])
+            a["accepted"] += int(r["accepted"])
+            a["declined"] += int(r["declined"])
+            if int(r["captured"]) > 0:
+                a["cap"][r["currency"]] = a["cap"].get(r["currency"], 0) + int(r["captured"])
+        out = []
+        for a in agg.values():
+            decided = a["accepted"] + a["declined"]
+            a["acceptance_rate"] = round(a["accepted"] / decided, 4) if decided else None
+            a["captured"] = [{"currency": k, "minor": v} for k, v in sorted(a.pop("cap").items())]
+            out.append(a)
+        out.sort(key=lambda x: -x["transactions"])
+        return {"merchants": out}
+
+
+def _distinct_currencies(cur, mid: int | None) -> list[str]:
+    cur.execute(
+        f"SELECT DISTINCT currency FROM transactions WHERE TRUE "
+        f"{'AND merchant_id=%(mid)s' if mid else ''} ORDER BY currency",
+        {"mid": mid})
+    return [r["currency"] for r in cur.fetchall()]
+
+
 def _integrity_summary(cur) -> dict:
     cur.execute("SELECT COUNT(*) AS n FROM ledger_events")
     ev = cur.fetchone()["n"]
@@ -410,12 +634,22 @@ def _merchant_item(cur, m) -> dict:
         caps.append({"currency": r["currency"], "amount_minor": int(r["s"] or 0)})
         n_total += int(r["n"])
         n_quarantined += int(r["q"])
+
+    # Current fee schedule (null for unconfigured merchants) — lets the Merchants
+    # UI show which preset each merchant is on before a bulk re-apply.
+    cur.execute(
+        "SELECT mdr_bps, approved_txn_fee_minor, declined_txn_fee_minor, "
+        "refund_fee_minor, chargeback_fee_minor, reserve_hold_bps, reserve_hold_days, "
+        "settlement_fee_bps, settlement_delay_days FROM fee_schedules WHERE merchant_id=%s",
+        (m["id"],))
+    fs = cur.fetchone()
     return {"merchant_uuid": str(m["merchant_uuid"]), "name": m["name"],
             "member_id": m["member_id"], "status": m["status"],
             "email": m.get("email"),
             "balances": sorted(bal.values(), key=lambda b: b["currency"]),
             "txn_count": n_total, "quarantined_count": n_quarantined,
-            "captured_minor_total": caps}
+            "captured_minor_total": caps,
+            "fee_schedule": {k: int(v) for k, v in fs.items()} if fs else None}
 
 
 @app.get("/api/merchants")
@@ -426,7 +660,13 @@ def merchants(user: dict = Depends(current_user)):
             cur.execute("SELECT * FROM merchants WHERE id=%s", (user["merchant_id"],))
         else:
             cur.execute("SELECT * FROM merchants ORDER BY name")
-        return {"items": [_merchant_item(cur, m) for m in cur.fetchall()]}
+        items = [_merchant_item(cur, m) for m in cur.fetchall()]
+        # Flag which merchants have set/been given a login password.
+        cur.execute("SELECT member_id FROM merchant_credentials")
+        with_login = {r["member_id"] for r in cur.fetchall()}
+        for it in items:
+            it["has_login"] = it.get("member_id") in with_login
+        return {"items": items}
 
 
 class MerchantRenameBody(BaseModel):
@@ -462,6 +702,50 @@ def rename_merchant(muuid: str, body: MerchantRenameBody, user: dict = Depends(r
             err(404, "not_found", "merchant not found")
         conn.commit()
         return {"ok": True, "merchant_uuid": muuid, "name": row["name"], "email": row["email"]}
+
+
+class CreateMerchantBody(BaseModel):
+    member_id: str
+    password: str
+    name: str | None = None
+    email: str | None = None
+
+
+@app.post("/api/merchants/create")
+def create_merchant(body: CreateMerchantBody, user: dict = Depends(require_admin)):
+    """Provision a merchant login directly — the admin picks the merchant ID and sets
+    the password, no upload required first. The merchant signs in with that ID (or
+    email) + password. Their fee schedule and transaction data are added later via
+    Upload + Set fee schedule; any imported rows with this member_id link to it."""
+    member_id = body.member_id.strip()
+    if not member_id:
+        err(400, "bad_id", "merchant ID is required")
+    if len(body.password) < MIN_PASSWORD_LEN:
+        err(400, "weak_password", f"password must be at least {MIN_PASSWORD_LEN} characters")
+    email = (body.email or "").strip() or None
+    if email and ("@" not in email or len(email) > 320):
+        err(400, "invalid_email", "not a valid email address")
+    name = (body.name or "").strip() or member_id
+    with get_pool().connection() as conn:
+        cur = conn.cursor()
+        cur.execute("SELECT 1 FROM merchants WHERE member_id=%s", (member_id,))
+        if cur.fetchone():
+            err(409, "id_taken", f"a merchant with ID “{member_id}” already exists")
+        if email:
+            cur.execute("SELECT 1 FROM merchants WHERE lower(email)=lower(%s)", (email,))
+            if cur.fetchone():
+                err(409, "email_taken", f"a merchant with email “{email}” already exists")
+        cur.execute(
+            "INSERT INTO merchants (member_id, name, email, status) "
+            "VALUES (%s,%s,%s,'active') RETURNING merchant_uuid",
+            (member_id, name, email))
+        muuid = cur.fetchone()["merchant_uuid"]
+        cur.execute(
+            "INSERT INTO merchant_credentials (member_id, password_hash) VALUES (%s,%s)",
+            (member_id, auth_mod.hash_password(body.password)))
+        conn.commit()
+        return {"ok": True, "merchant_uuid": str(muuid), "member_id": member_id,
+                "name": name, "email": email}
 
 
 @app.get("/api/merchants/unconfigured")
@@ -512,6 +796,12 @@ def set_fee_schedule(muuid: str, body: FeeScheduleBody, user: dict = Depends(req
         except ValueError as e:
             err(400, "onboard_failed", str(e))
         conn.commit()
+        # Auto-generate the settlement now that fees are set — no "Generate" click.
+        try:
+            summary["auto_settlements"] = cycle_mod.generate_pending(
+                conn, generated_by="auto-onboard", merchant_ids=[m["id"]])
+        except Exception:
+            summary["auto_settlements"] = {"generated": 0, "existing": 0, "skipped": 0}
         return summary
 
 
@@ -528,7 +818,7 @@ def bulk_set_fee_schedule(body: BulkFeeScheduleBody, user: dict = Depends(requir
         rates = onboarding_mod.resolve_rates(preset=body.preset, overrides=overrides)
     except ValueError as e:
         err(400, "invalid_rates", str(e))
-    results, errors = [], []
+    results, errors, applied_ids = [], [], []
     for muuid in body.merchant_uuids:
         with get_pool().connection() as conn:
             cur = conn.cursor()
@@ -541,11 +831,21 @@ def bulk_set_fee_schedule(body: BulkFeeScheduleBody, user: dict = Depends(requir
                 s = onboarding_mod.assign_fee_schedule(conn, m["id"], rates)
                 results.append({"merchant_uuid": muuid,
                                 "transactions_posted": s["transactions_posted"]})
+                applied_ids.append(m["id"])
             except ValueError as e:
                 errors.append({"merchant_uuid": muuid, "error": str(e)})
             conn.commit()
+    # Auto-generate settlements for the merchants just configured — no click.
+    auto = {"generated": 0, "existing": 0, "skipped": 0}
+    if applied_ids:
+        try:
+            with get_pool().connection() as gconn:
+                auto = cycle_mod.generate_pending(gconn, generated_by="auto-onboard",
+                                                  merchant_ids=applied_ids)
+        except Exception:
+            pass
     return {"applied": len(results), "failed": len(errors),
-            "results": results, "errors": errors}
+            "results": results, "errors": errors, "auto_settlements": auto}
 
 
 # ---------------------------------------------------------------- fee presets
@@ -946,6 +1246,7 @@ class GenerateBody(BaseModel):
     currency: str
     window_start: str
     window_end: str
+    confirmation_code: str | None = None
 
 
 def _window_start(s: str) -> datetime:
@@ -975,9 +1276,13 @@ def generate_settlement(body: GenerateBody, user: dict = Depends(require_admin))
             err(404, "not_found", "merchant not found")
         ws = _window_start(body.window_start)
         we = _window_end(body.window_end)
-        res = settle_mod.generate(conn, merchant_id=m["id"], currency=body.currency.upper(),
-                                  window_start=ws, window_end=we,
-                                  generated_by=user["sub"])
+        try:
+            res = settle_mod.generate(conn, merchant_id=m["id"], currency=body.currency.upper(),
+                                      window_start=ws, window_end=we,
+                                      generated_by=user["sub"],
+                                      custom_code=body.confirmation_code)
+        except settle_mod.SettlementError as e:
+            err(409, e.code, e.message)
         if res.get("skipped"):
             return res
         cur.execute("SELECT settlement_uuid FROM settlements WHERE id=%s",
@@ -999,9 +1304,13 @@ def generate_per_day_settlements(body: GenerateBody, user: dict = Depends(requir
             err(404, "not_found", "merchant not found")
         ws = _window_start(body.window_start)
         we = _window_end(body.window_end)
-        summary = settle_mod.generate_per_day(
-            conn, merchant_id=m["id"], currency=body.currency.upper(),
-            window_start=ws, window_end=we, generated_by=user["sub"])
+        try:
+            summary = settle_mod.generate_per_day(
+                conn, merchant_id=m["id"], currency=body.currency.upper(),
+                window_start=ws, window_end=we, generated_by=user["sub"],
+                custom_code=body.confirmation_code)
+        except settle_mod.SettlementError as e:
+            err(409, e.code, e.message)
         conn.commit()
         return summary
 
@@ -1208,8 +1517,10 @@ def mail_oauth_start(request: Request, user: dict = Depends(require_admin)):
                        auth_mod.SECRET, algorithm="HS256")
     auth_url = "https://accounts.google.com/o/oauth2/v2/auth?" + urllib.parse.urlencode({
         "client_id": client_id, "redirect_uri": redirect_uri, "response_type": "code",
-        "scope": _GMAIL_SEND_SCOPE, "access_type": "offline", "prompt": "consent",
-        "state": state,
+        # openid+email so the token response carries the mailbox address → we can set
+        # the From automatically and the admin never types anything.
+        "scope": f"openid email {_GMAIL_SEND_SCOPE}", "access_type": "offline",
+        "prompt": "consent", "state": state,
     })
     return {"auth_url": auth_url, "redirect_uri": redirect_uri}
 
@@ -1248,8 +1559,17 @@ def mail_oauth_callback(request: Request, code: str | None = None,
     rt = tok.get("refresh_token")
     if not rt:
         return back("mail_error=no_refresh_token")
+    updates = {"TW_GMAIL_REFRESH_TOKEN": rt, "TW_MAIL_ENABLED": ""}
+    # Capture the authorized mailbox from the id_token and use it as the From address
+    # (unless one is already set) so a single click fully configures sending.
+    try:
+        email = jwt.decode(tok.get("id_token", ""), options={"verify_signature": False}).get("email")
+    except Exception:
+        email = None
+    if email and not mailer_mod._cfg("TW_MAIL_FROM"):
+        updates["TW_MAIL_FROM"] = f"CoreServices <{email}>"
     with get_pool().connection() as conn:
-        settings_store_mod.save(conn, {"TW_GMAIL_REFRESH_TOKEN": rt, "TW_MAIL_ENABLED": ""})
+        settings_store_mod.save(conn, updates)
     return back("mail_connected=1")
 
 
@@ -1287,12 +1607,6 @@ def settlement_detail(suuid: str, user: dict = Depends(current_user)):
         cur.execute("SELECT * FROM fee_schedules WHERE merchant_id=%s", (s["merchant_id"],))
         fs = cur.fetchone() or {}
         fee_schedule = {k: v for k, v in fs.items() if k != "merchant_id"}
-        # USDC display conversion (demo: USD 1:1; others indicative)
-        rates = {"USD": "1.0000", "EUR": "1.0850", "AUD": "0.6650", "CAD": "0.7350",
-                 "GBP": "1.2700", "JPY": "0.0069"}
-        rate = rates.get(s["currency"], "1.0000")
-        usdc_amount = f"{float(rate) * s['net_payout_minor'] / 100:.2f}" \
-            if s["currency"] != "JPY" else f"{float(rate) * s['net_payout_minor']:.2f}"
         return {"settlement_uuid": str(s["settlement_uuid"]),
                 "confirmation_code": s.get("confirmation_code"),
                 "merchant_uuid": str(s["m_uuid"]), "merchant_name": s["merchant_name"],
@@ -1300,7 +1614,6 @@ def settlement_detail(suuid: str, user: dict = Depends(current_user)):
                 "window_end": s["window_end"].isoformat(), "state": s["state"],
                 "counts": counts, "breakdown": bd,
                 "fee_schedule": fee_schedule,
-                "usdc": {"rate": rate, "amount": usdc_amount},
                 "items_count": items_count,
                 "net_payout_minor": int(s["net_payout_minor"])}
 
@@ -1721,11 +2034,22 @@ def integrity(user: dict = Depends(current_user)):
         checks.append({"name": "Ledger is append-only (UPDATE/DELETE rejected)",
                        "ok": ok_append, "detail": detail})
         cur.execute("SELECT COUNT(*) AS n FROM posting_idempotency")
-        idem = cur.fetchone()["n"]
+        idem = int(cur.fetchone()["n"])
+        cur.execute("SELECT COUNT(*) AS n FROM posting_idempotency pi "
+                    "LEFT JOIN ledger_events le ON le.id = pi.event_id WHERE le.id IS NULL")
+        orphans = int(cur.fetchone()["n"])
+        # Each source event is posted exactly once — a UNIQUE(source_type, source_id)
+        # gate, so replayed imports post nothing. The ledger legitimately holds MORE
+        # events than source keys: append-only fee reprices / reserve recalcs post
+        # reversal+replay events that don't mint new source keys. So the invariant is
+        # "every key resolves to a live event", NOT a 1:1 count with total events.
+        extra = s["events"] - idem
         checks.append({"name": "Idempotent posting (unique source event gate)",
-                       "ok": int(idem) == s["events"],
-                       "detail": f"{idem:,} unique source events map 1:1 to {s['events']:,} "
-                                 "ledger events; replayed imports post nothing"})
+                       "ok": orphans == 0,
+                       "detail": f"{idem:,} unique source events, each posted once; "
+                                 + (f"{extra:,} append-only reversal/replay events from reprices; "
+                                    if extra else "")
+                                 + f"{orphans} orphaned keys"})
         return {"checks": checks, "ok": all(c["ok"] for c in checks)}
 
 

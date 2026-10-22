@@ -9,7 +9,7 @@ skipped result instead of raising), so the app runs fine locally without creds:
   TW_GMAIL_CLIENT_ID       OAuth client id
   TW_GMAIL_CLIENT_SECRET   OAuth client secret
   TW_GMAIL_REFRESH_TOKEN   refresh token for the sending account
-  TW_MAIL_FROM             From header, e.g. "TransactWorld <payouts@acme.com>"
+  TW_MAIL_FROM             From header, e.g. "CoreServices <payouts@acme.com>"
   TW_MAIL_ENABLED          optional master switch ("0" force-disables)
 
 No third-party deps: token refresh and message send go over stdlib urllib.

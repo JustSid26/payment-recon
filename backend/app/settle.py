@@ -7,6 +7,7 @@ is <= 0, nothing links and nothing posts.
 """
 from __future__ import annotations
 
+import re
 from datetime import datetime, time, timezone
 
 import psycopg
@@ -20,10 +21,6 @@ CANDIDATE_TYPES = (
     "reversal",
 )
 
-# Rolling-reserve movements are excluded from the settlement-fee base (the fee
-# covers everything else that settled, not funds merely parked in reserve).
-RESERVE_EVENT_TYPES = ("reserve_hold", "reserve_release")
-
 
 class SettlementError(Exception):
     def __init__(self, code: str, message: str):
@@ -31,10 +28,20 @@ class SettlementError(Exception):
         super().__init__(message)
 
 
+def clean_code(raw: str | None) -> str | None:
+    """Normalise an admin-supplied confirmation code: trim, uppercase, keep
+    alphanumerics and dashes (any other run becomes a single dash). Returns None
+    when nothing usable remains, so callers fall back to the auto-generated code."""
+    if not raw:
+        return None
+    s = re.sub(r"[^A-Za-z0-9]+", "-", raw.strip().upper()).strip("-")
+    return s[:40] or None
+
+
 def generate(conn: psycopg.Connection, *, merchant_id: int, currency: str,
              window_start: datetime, window_end: datetime,
              cutoff: datetime | None = None, scope_by_occurred: bool = True,
-             generated_by: str = "admin") -> dict:
+             generated_by: str = "admin", custom_code: str | None = None) -> dict:
     """Returns {'settlement_id': ...} or {'skipped': True, 'reason': ...}.
 
     Candidate selection:
@@ -62,11 +69,28 @@ def generate(conn: psycopg.Connection, *, merchant_id: int, currency: str,
         prior = cur.fetchone()
         if prior:
             cur.execute(
-                "SELECT id FROM settlements WHERE generated_event_id=%s", (prior["event_id"],),
+                "SELECT id, state FROM settlements WHERE generated_event_id=%s "
+                "AND state <> 'cancelled'",
+                (prior["event_id"],),
             )
             s = cur.fetchone()
+            reuse = False
             if s:
+                cur.execute("SELECT COUNT(*) AS n FROM settlement_day_payouts "
+                            "WHERE settlement_id=%s", (s["id"],))
+                paid = cur.fetchone()["n"] > 0
+                # Only short-circuit when the run-key still points at the current
+                # OPEN, unpaid settlement — that's a genuine re-run to dedupe. Once
+                # that settlement has been (even partly) paid or completed, it's done;
+                # newly-arrived transactions legitimately open a fresh settlement, so
+                # release the stale per-day gate instead of returning the paid one.
+                reuse = s["state"] == "generated" and not paid
+            if reuse:
                 return {"settlement_id": s["id"], "existing": True}
+            # The run-key points at a cancelled/paid/vanished settlement — self-heal
+            # by clearing the stale gate so a fresh settlement can be posted.
+            cur.execute("DELETE FROM posting_idempotency WHERE source_type='settlement_run' "
+                        "AND source_id=%s", (run_key,))
 
         cur.execute("SELECT id FROM accounts WHERE account_type='merchant_payable' "
                     "AND merchant_id=%s AND currency=%s", (merchant_id, currency))
@@ -122,12 +146,12 @@ def generate(conn: psycopg.Connection, *, merchant_id: int, currency: str,
                                       f"until then."}
             return {"skipped": True, "reason": "no unsettled transactions in this window"}
 
-        n_window = sum(c["delta"] for c in cands)      # actual net, incl. reserve moves
-        # The settlement fee is charged on everything EXCEPT the rolling reserve
-        # (holds are just parked funds, not a settled amount to skim). Base = the
-        # net of all candidates minus the reserve_hold/reserve_release deltas.
-        fee_base = sum(c["delta"] for c in cands
-                       if c["event_type"] not in RESERVE_EVENT_TYPES)
+        n_window = sum(c["delta"] for c in cands)      # net payable, after reserve is parked
+        # The settlement fee is charged on the SUBTOTAL that's actually being
+        # settled — i.e. the after-reserve net. The rolling reserve is the
+        # merchant's own funds held as collateral, so it isn't fee-bearing (this
+        # matches how mainstream processors settle). fee_base == the subtotal.
+        fee_base = n_window
         cur.execute("SELECT settlement_fee_bps FROM fee_schedules WHERE merchant_id=%s",
                     (merchant_id,))
         fee_bps = (cur.fetchone() or {"settlement_fee_bps": 100})["settlement_fee_bps"]
@@ -138,8 +162,22 @@ def generate(conn: psycopg.Connection, *, merchant_id: int, currency: str,
                     "reason": f"net <= 0 (window nets to {n_window} minor units before fees); "
                               "deficit carries to the next settlement"}
 
+        # Recorded window: the backlog-drain path (scope_by_occurred=False, used by
+        # the auto-generate + cycle) sweeps an arbitrary range (e.g. 2000-01-01 → now),
+        # which reads badly on the report. Store the ACTUAL span of the settled
+        # transactions — first settled date → last settled date. The occurred-scoped
+        # path keeps the picked processing window.
+        win_start, win_end = window_start, window_end
+        if not scope_by_occurred:
+            cur.execute("SELECT MIN(occurred_at) AS mn, MAX(occurred_at) AS mx "
+                        "FROM ledger_events WHERE id = ANY(%s)",
+                        ([c["event_id"] for c in cands],))
+            span = cur.fetchone()
+            if span and span["mn"] and span["mx"]:
+                win_start, win_end = span["mn"], span["mx"]
+
         breakdown = _breakdown(cur, [c["event_id"] for c in cands], merchant_id, currency,
-                               window_start, window_end)
+                               win_start, win_end)
         breakdown["subtotal_minor"] = n_window
         breakdown["settlement_fee_minor"] = sf
         breakdown["net_payout_minor"] = net
@@ -148,7 +186,7 @@ def generate(conn: psycopg.Connection, *, merchant_id: int, currency: str,
             """INSERT INTO settlements (merchant_id, currency, window_start, window_end,
                  state, breakdown, net_payout_minor)
                VALUES (%s,%s,%s,%s,'generated',%s,%s) RETURNING id""",
-            (merchant_id, currency, window_start, window_end,
+            (merchant_id, currency, win_start, win_end,
              psycopg.types.json.Json(breakdown), net),
         )
         sid = cur.fetchone()["id"]
@@ -159,10 +197,20 @@ def generate(conn: psycopg.Connection, *, merchant_id: int, currency: str,
         # the code is guaranteed unique (enforced by a UNIQUE index).
         cur.execute("SELECT settlement_uuid FROM settlements WHERE id=%s", (sid,))
         uhex = cur.fetchone()["settlement_uuid"].hex
-        code = "TW-" + uhex[:10].upper()
-        cur.execute("SELECT 1 FROM settlements WHERE confirmation_code=%s", (code,))
-        if cur.fetchone():
-            code = "TW-" + uhex.upper()
+        code = clean_code(custom_code)
+        if code:
+            # Admin-supplied code: must be unique across settlements (the merchant
+            # looks the payout up by it). Reject a clash instead of silently
+            # overwriting the auto code with a duplicate.
+            cur.execute("SELECT 1 FROM settlements WHERE confirmation_code=%s", (code,))
+            if cur.fetchone():
+                raise SettlementError(
+                    "code_taken", f"confirmation code “{code}” is already in use")
+        else:
+            code = "TW-" + uhex[:10].upper()
+            cur.execute("SELECT 1 FROM settlements WHERE confirmation_code=%s", (code,))
+            if cur.fetchone():
+                code = "TW-" + uhex.upper()
         cur.execute("UPDATE settlements SET confirmation_code=%s WHERE id=%s", (code, sid))
         cur.executemany(
             "INSERT INTO settlement_items (settlement_id, event_id, payable_delta_minor) "
@@ -192,7 +240,8 @@ def generate(conn: psycopg.Connection, *, merchant_id: int, currency: str,
 
 def generate_per_day(conn: psycopg.Connection, *, merchant_id: int, currency: str,
                      window_start: datetime, window_end: datetime,
-                     cutoff: datetime | None = None, generated_by: str = "admin") -> dict:
+                     cutoff: datetime | None = None, generated_by: str = "admin",
+                     custom_code: str | None = None) -> dict:
     """Generate ONE settlement per processing day in [window_start, window_end].
 
     Each day becomes its own settlement (scoped by occurred_at), so it can be
@@ -219,13 +268,18 @@ def generate_per_day(conn: psycopg.Connection, *, merchant_id: int, currency: st
          "cutoff": cutoff, "ws": window_start, "we": window_end},
     )
     days = [r["d"] for r in cur.fetchall()]
+    base = clean_code(custom_code)
     results, generated, skipped = [], 0, 0
     for d in days:
         ds = datetime.combine(d, time(0, 0), tzinfo=timezone.utc)
         de = datetime.combine(d, time(23, 59, 59, 999999), tzinfo=timezone.utc)
+        # each day is its own settlement → give a custom base a per-day suffix so
+        # the unique-code constraint holds across the range.
+        day_code = f"{base}-{d.strftime('%Y%m%d')}" if base else None
         res = generate(conn, merchant_id=merchant_id, currency=currency,
                        window_start=ds, window_end=de, cutoff=cutoff,
-                       scope_by_occurred=True, generated_by=generated_by)
+                       scope_by_occurred=True, generated_by=generated_by,
+                       custom_code=day_code)
         if res.get("skipped"):
             skipped += 1
             results.append({"date": d.isoformat(), "status": "skipped", "reason": res["reason"]})
@@ -514,10 +568,12 @@ def day_payouts(conn: psycopg.Connection, settlement_id: int) -> dict:
     """Per-processing-day payout breakdown for a settlement, with paid status.
 
     Each day's payout = that day's payable subtotal (Σ settlement_items delta)
-    minus its share of the once-per-settlement settlement fee, allocated
-    proportionally with the remainder on the last positive day — the SAME
+    minus its share of the settlement fee. Already-PAID days are LOCKED at their
+    recorded payout (so appending new days later never disturbs paid history); the
+    remaining fee is allocated across the still-unpaid positive days proportionally,
+    with the rounding remainder on the last unpaid positive day. The day payouts
+    therefore always sum exactly to the settlement's net_payout_minor — the SAME
     allocation the UI shows, so the number confirmed equals the number displayed.
-    The day payouts sum exactly to the settlement's net_payout_minor.
     """
     cur = conn.cursor()
     cur.execute("SELECT merchant_id, currency, breakdown, net_payout_minor, state, "
@@ -525,7 +581,7 @@ def day_payouts(conn: psycopg.Connection, settlement_id: int) -> dict:
     s = cur.fetchone()
     if s is None:
         raise SettlementError("not_found", "settlement not found")
-    fee = int((s["breakdown"] or {}).get("settlement_fee_minor", 0))
+    total_fee = int((s["breakdown"] or {}).get("settlement_fee_minor", 0))
     base_code = s["confirmation_code"] or "TW"
     cur.execute(
         """SELECT e.occurred_at::date AS day, SUM(si.payable_delta_minor) AS subtotal
@@ -534,25 +590,43 @@ def day_payouts(conn: psycopg.Connection, settlement_id: int) -> dict:
         (settlement_id,),
     )
     rows = [{"day": r["day"], "subtotal": int(r["subtotal"])} for r in cur.fetchall()]
-    bases = [max(r["subtotal"], 0) for r in rows]
-    total_base = sum(bases)
-    allocs = [(fee * b) // total_base if total_base > 0 else 0 for b in bases]
-    if total_base > 0:
-        last_pos = max((i for i, b in enumerate(bases) if b > 0), default=-1)
-        if last_pos >= 0:
-            allocs[last_pos] += fee - sum(allocs)
 
     cur.execute("SELECT day, payout_minor, payout_reference, paid_at "
                 "FROM settlement_day_payouts WHERE settlement_id=%s", (settlement_id,))
     paid = {r["day"].isoformat(): r for r in cur.fetchall()}
 
+    # Fee already borne by paid days is locked in; only the rest is up for allocation.
+    paid_fee = sum(r["subtotal"] - int(paid[r["day"].isoformat()]["payout_minor"])
+                   for r in rows if r["day"].isoformat() in paid)
+    remaining_fee = max(total_fee - paid_fee, 0)
+    unpaid_idx = [i for i, r in enumerate(rows) if r["day"].isoformat() not in paid]
+    bases = [max(rows[i]["subtotal"], 0) for i in unpaid_idx]
+    total_base = sum(bases)
+    alloc: dict[int, int] = {}
+    if total_base > 0:
+        acc, last_pos = 0, None
+        for k, i in enumerate(unpaid_idx):
+            a = (remaining_fee * bases[k]) // total_base
+            alloc[i] = a
+            acc += a
+            if bases[k] > 0:
+                last_pos = i
+        if last_pos is not None:
+            alloc[last_pos] += remaining_fee - acc
+
     days = []
-    for r, a in zip(rows, allocs):
+    for i, r in enumerate(rows):
         iso = r["day"].isoformat()
         p = paid.get(iso)
+        if p:
+            payout = int(p["payout_minor"])
+            fee = r["subtotal"] - payout
+        else:
+            fee = alloc.get(i, 0)
+            payout = r["subtotal"] - fee
         days.append({
-            "day": iso, "subtotal_minor": r["subtotal"], "fee_minor": a,
-            "payout_minor": r["subtotal"] - a, "paid": p is not None,
+            "day": iso, "subtotal_minor": r["subtotal"], "fee_minor": fee,
+            "payout_minor": payout, "paid": p is not None,
             # per-day confirmation code: settlement code + the processing date, so it
             # is unique per day and traceable back to the settlement.
             "confirmation_code": f"{base_code}-{iso.replace('-', '')}",
@@ -664,9 +738,163 @@ def cancel(conn: psycopg.Connection, settlement_id: int) -> dict:
             cur.execute("DELETE FROM fees WHERE ledger_event_id=%s", (gen_eid,))
         # free the linked events (settlement_items is operational, not the ledger)
         cur.execute("DELETE FROM settlement_items WHERE settlement_id=%s", (settlement_id,))
-        # let the same window be generated again (release the run-key idempotency gate)
-        run_key = f"{s['merchant_id']}:{s['currency']}:{s['window_end'].date()}"
-        cur.execute("DELETE FROM posting_idempotency WHERE source_type='settlement_run' "
-                    "AND source_id=%s", (run_key,))
+        # let the same window be generated again (release the run-key idempotency
+        # gate). Delete by the generated event itself — the run-key's date is the
+        # generation cutoff, which may differ from the stored window_end (that now
+        # reflects the actual settled span), so reconstructing it is unreliable.
+        if gen_eid is not None:
+            cur.execute("DELETE FROM posting_idempotency WHERE source_type='settlement_run' "
+                        "AND event_id=%s", (gen_eid,))
         cur.execute("UPDATE settlements SET state='cancelled' WHERE id=%s", (settlement_id,))
         return {"settlement_id": settlement_id, "state": "cancelled"}
+
+
+def append(conn: psycopg.Connection, settlement_id: int, *,
+           cutoff: datetime | None = None, generated_by: str = "auto") -> dict:
+    """Fold newly-matured, unsettled transactions into an EXISTING settlement — the
+    "one running account per merchant" model. New days are linked as settlement_items
+    and an incremental settlement_generated event moves their net into
+    settlement_payable; the settlement's window/net/breakdown grow and it re-opens to
+    'generated' if it had been fully paid. Already-paid days are untouched. A batch
+    that nets ≤ 0 is left unsettled to carry (same deficit rule as generate)."""
+    cutoff = cutoff or datetime.now(timezone.utc)
+    with conn.transaction():
+        cur = conn.cursor()
+        cur.execute("SELECT * FROM settlements WHERE id=%s FOR UPDATE", (settlement_id,))
+        s = cur.fetchone()
+        if s is None:
+            raise SettlementError("not_found", "settlement not found")
+        if s["state"] == "cancelled":
+            raise SettlementError("invalid_state", "cannot append to a cancelled settlement")
+        mid, ccy = s["merchant_id"], s["currency"]
+        cur.execute("SELECT pg_advisory_xact_lock(hashtext(%s))", (f"settle:{mid}:{ccy}",))
+        cur.execute("SELECT id FROM accounts WHERE account_type='merchant_payable' "
+                    "AND merchant_id=%s AND currency=%s", (mid, ccy))
+        acct = cur.fetchone()
+        if acct is None:
+            return {"appended": 0}
+
+        cur.execute(
+            """SELECT e.id AS event_id, MIN(e.occurred_at) AS occ,
+                      SUM(CASE WHEN le.direction='credit' THEN le.amount_minor
+                               ELSE -le.amount_minor END) AS delta
+                 FROM ledger_events e
+                 JOIN ledger_entries le ON le.event_id = e.id AND le.account_id = %(acct)s
+                 LEFT JOIN settlement_items si ON si.event_id = e.id
+                WHERE e.merchant_id = %(mid)s AND e.currency = %(ccy)s
+                  AND e.event_type = ANY(%(types)s)
+                  AND e.settle_after <= %(cutoff)s AND si.event_id IS NULL
+                GROUP BY e.id
+               HAVING SUM(CASE WHEN le.direction='credit' THEN le.amount_minor
+                               ELSE -le.amount_minor END) <> 0""",
+            {"acct": acct["id"], "mid": mid, "ccy": ccy,
+             "types": list(CANDIDATE_TYPES), "cutoff": cutoff})
+        cands = [{"event_id": c["event_id"], "occ": c["occ"], "delta": int(c["delta"])}
+                 for c in cur.fetchall()]
+        if not cands:
+            return {"appended": 0}
+
+        subtotal_add = sum(c["delta"] for c in cands)
+        cur.execute("SELECT settlement_fee_bps FROM fee_schedules WHERE merchant_id=%s", (mid,))
+        fee_bps = (cur.fetchone() or {"settlement_fee_bps": 100})["settlement_fee_bps"]
+        fee_add = bps_of(max(subtotal_add, 0), fee_bps)
+        net_add = subtotal_add - fee_add
+        if net_add <= 0:
+            return {"appended": 0, "skipped": True,
+                    "reason": f"batch nets to {subtotal_add} before fees; carries"}
+
+        cur.executemany(
+            "INSERT INTO settlement_items (settlement_id, event_id, payable_delta_minor) "
+            "VALUES (%s,%s,%s)", [(settlement_id, c["event_id"], c["delta"]) for c in cands])
+
+        legs = [Leg("merchant_payable", mid, DEBIT, net_add + fee_add),
+                Leg("settlement_payable", mid, CREDIT, net_add)]
+        if fee_add:
+            legs.append(Leg("gateway_revenue", None, CREDIT, fee_add))
+        max_eid = max(c["event_id"] for c in cands)
+        event_id, _ = post_event(
+            conn, event_type="settlement_generated", source_type="settlement_run",
+            source_id=f"{settlement_id}:append:{max_eid}", merchant_id=mid, currency=ccy,
+            occurred_at=datetime.now(timezone.utc), legs=legs,
+            metadata={"settlement_id": settlement_id, "generated_by": generated_by, "append": True})
+        if fee_add:
+            cur.execute(
+                "INSERT INTO fees (merchant_id, fee_type, currency, fee_minor, ledger_event_id) "
+                "VALUES (%s,'settlement_fee',%s,%s,%s)", (mid, ccy, fee_add, event_id))
+
+        # Grow the settlement. Display fields recomputed over ALL items; subtotal / fee
+        # / net accumulated so they stay exactly ledger-consistent.
+        new_min = min(c["occ"] for c in cands)
+        new_max = max(c["occ"] for c in cands)
+        win_start = min(s["window_start"], new_min)
+        win_end = max(s["window_end"], new_max)
+        cur.execute("SELECT event_id FROM settlement_items WHERE settlement_id=%s", (settlement_id,))
+        all_ids = [r["event_id"] for r in cur.fetchall()]
+        old_bd = s["breakdown"] or {}
+        bd = _breakdown(cur, all_ids, mid, ccy, win_start, win_end)
+        bd["subtotal_minor"] = int(old_bd.get("subtotal_minor", 0)) + subtotal_add
+        bd["settlement_fee_minor"] = int(old_bd.get("settlement_fee_minor", 0)) + fee_add
+        new_net = int(s["net_payout_minor"]) + net_add
+        bd["net_payout_minor"] = new_net
+        cur.execute(
+            "UPDATE settlements SET net_payout_minor=%s, window_start=%s, window_end=%s, "
+            "state='generated', breakdown=%s WHERE id=%s",
+            (new_net, win_start, win_end, psycopg.types.json.Json(bd), settlement_id))
+        return {"appended": len(cands), "net_add": net_add, "settlement_id": settlement_id}
+
+
+def merge_settlements(conn: psycopg.Connection, merchant_id: int, currency: str) -> tuple:
+    """Fold every non-cancelled settlement for a merchant×currency into the oldest
+    (canonical) one, so a merchant shows a single running settlement. Operational row
+    surgery only — re-points settlement_items + settlement_day_payouts, sums
+    net/fee/subtotal, extends the window, recomputes the display breakdown, and sets
+    state ('generated' if any processing day is still unpaid, else 'completed'). The
+    ledger is untouched: each settlement's generation/completion events already
+    posted, and settlement_payable already nets across them. Returns
+    (canonical_id | None, merged_count)."""
+    with conn.transaction():
+        cur = conn.cursor()
+        cur.execute("SELECT pg_advisory_xact_lock(hashtext(%s))",
+                    (f"settle:{merchant_id}:{currency}",))
+        cur.execute("SELECT id, state, net_payout_minor, breakdown, window_start, window_end "
+                    "FROM settlements WHERE merchant_id=%s AND currency=%s "
+                    "AND state <> 'cancelled' ORDER BY id", (merchant_id, currency))
+        rows = cur.fetchall()
+        if len(rows) <= 1:
+            return (rows[0]["id"] if rows else None, 0)
+        canon = rows[0]["id"]
+        rest = [r["id"] for r in rows[1:]]
+        ids = [canon] + rest
+        # A processing day paid in two different settlements would collide on the
+        # (settlement_id, day) PK once re-pointed. Each event settles once so this
+        # can't normally happen — fail loudly rather than corrupt if it ever does.
+        cur.execute("SELECT day FROM settlement_day_payouts WHERE settlement_id = ANY(%s) "
+                    "GROUP BY day HAVING COUNT(*) > 1", (ids,))
+        if cur.fetchone():
+            raise SettlementError("merge_conflict",
+                                  "the same processing day is paid in two settlements")
+        cur.execute("UPDATE settlement_items SET settlement_id=%s WHERE settlement_id = ANY(%s)",
+                    (canon, rest))
+        cur.execute("UPDATE settlement_day_payouts SET settlement_id=%s "
+                    "WHERE settlement_id = ANY(%s)", (canon, rest))
+
+        total_net = sum(int(r["net_payout_minor"]) for r in rows)
+        total_fee = sum(int((r["breakdown"] or {}).get("settlement_fee_minor", 0)) for r in rows)
+        win_start = min(r["window_start"] for r in rows)
+        win_end = max(r["window_end"] for r in rows)
+        cur.execute("SELECT event_id FROM settlement_items WHERE settlement_id=%s", (canon,))
+        all_ids = [r["event_id"] for r in cur.fetchall()]
+        bd = _breakdown(cur, all_ids, merchant_id, currency, win_start, win_end)
+        bd["subtotal_minor"] = total_net + total_fee
+        bd["settlement_fee_minor"] = total_fee
+        bd["net_payout_minor"] = total_net
+
+        # Fully paid only if every folded settlement was itself completed (handles both
+        # per-day and whole-settlement completion); otherwise it stays open.
+        state = "completed" if all(r["state"] == "completed" for r in rows) else "generated"
+
+        cur.execute("UPDATE settlements SET net_payout_minor=%s, window_start=%s, "
+                    "window_end=%s, breakdown=%s, state=%s WHERE id=%s",
+                    (total_net, win_start, win_end, psycopg.types.json.Json(bd), state, canon))
+        cur.execute("DELETE FROM settlements WHERE id = ANY(%s)", (rest,))
+        return (canon, len(rest))

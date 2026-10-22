@@ -308,9 +308,4 @@ CREATE TABLE IF NOT EXISTS fee_presets (
   settlement_schedule     TEXT NOT NULL DEFAULT 'daily',
   created_at              TIMESTAMPTZ NOT NULL DEFAULT now()
 );
-INSERT INTO fee_presets (name, mdr_bps, approved_txn_fee_minor, declined_txn_fee_minor,
-    refund_fee_minor, chargeback_fee_minor, reserve_hold_bps, reserve_hold_days,
-    settlement_fee_bps, settlement_delay_days, settlement_schedule) VALUES
-  ('Workbook',  500, 30,  0, 4000, 7000,  500, 180, 100, 0, 'daily'),
-  ('Canamoney', 650, 35, 10, 1000, 7000, 1000, 180, 100, 0, 'daily')
-ON CONFLICT (name) DO NOTHING;
+-- No fee presets are seeded — each deployment's admins create their own.

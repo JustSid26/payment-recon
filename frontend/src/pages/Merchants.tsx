@@ -6,6 +6,9 @@ import type { Merchant } from '../lib/types'
 import { fmtInt, fmtMoney } from '../lib/money'
 import { DataTable, EmptyState, StatusChip, toastSuccess, type Column } from '../components/ui'
 import { FeeScheduleModal, type FeeRates } from '../components/FeeScheduleModal'
+import { ApplyPresetModal } from '../components/ApplyPresetModal'
+
+type ApplyResult = { applied: number; failed: number; auto_settlements?: { generated: number; appended?: number } }
 
 type Filter = 'all' | 'active' | 'unconfigured'
 
@@ -53,19 +56,24 @@ export default function Merchants() {
       return n
     })
 
-  const applyBulkFees = async (rates: FeeRates) => {
-    const res = await api<{ applied: number; failed: number }>('/api/merchants/fee-schedule/bulk', {
-      method: 'POST',
-      body: { ...rates, merchant_uuids: [...selected] },
-    })
-    toastSuccess(`Fees applied to ${res.applied} merchant${res.applied === 1 ? '' : 's'}${res.failed ? ` · ${res.failed} failed` : ''}`)
-    setSelected(new Set())
-    reload()
+  const settledNote = (r: ApplyResult) => {
+    const g = (r.auto_settlements?.generated ?? 0) + (r.auto_settlements?.appended ?? 0)
+    return g > 0 ? ` · ${g} settlement${g === 1 ? '' : 's'} updated` : ''
   }
 
-  const createPreset = async (rates: FeeRates, name: string) => {
+  const createPreset = async (rates: FeeRates, name: string, alsoApply: boolean) => {
     await api('/api/fee-presets', { method: 'POST', body: { name, ...rates } })
-    toastSuccess(`Preset "${name}" created`)
+    if (alsoApply && selected.size > 0) {
+      const res = await api<ApplyResult>('/api/merchants/fee-schedule/bulk', {
+        method: 'POST',
+        body: { ...rates, merchant_uuids: [...selected] },
+      })
+      toastSuccess(`Preset "${name}" created · applied to ${res.applied} merchant${res.applied === 1 ? '' : 's'}${settledNote(res)}`)
+      setSelected(new Set())
+      reload()
+    } else {
+      toastSuccess(`Preset "${name}" created`)
+    }
   }
 
   const cols: Column<Merchant>[] = [
@@ -123,7 +131,7 @@ export default function Merchants() {
         </div>
         <div style={{ marginLeft: 'auto', display: 'flex', gap: 8 }}>
           <button className="btn" onClick={() => setShowCreate(true)}>Create preset</button>
-          <button className="btn primary" disabled={selected.size === 0} onClick={() => setShowFees(true)}>
+          <button className="btn primary" onClick={() => setShowFees(true)}>
             Set fee schedule{selected.size > 0 ? ` (${selected.size})` : ''}
           </button>
         </div>
@@ -149,12 +157,12 @@ export default function Merchants() {
       </div>
 
       {showFees && (
-        <FeeScheduleModal
-          title={`Set fees — ${selected.size} merchant${selected.size === 1 ? '' : 's'}`}
-          subtitle="Applies this schedule to every selected merchant and posts their held transactions."
-          saveLabel="Apply to selected"
+        <ApplyPresetModal
+          merchants={items}
+          initialSelected={selected}
           onClose={() => setShowFees(false)}
-          onSubmit={applyBulkFees}
+          onApplied={() => { setSelected(new Set()); reload() }}
+          onCreatePreset={() => { setShowFees(false); setShowCreate(true) }}
         />
       )}
 
@@ -164,6 +172,7 @@ export default function Merchants() {
           subtitle="Save a reusable named fee config. It won't change any merchant until you apply it."
           saveLabel="Create preset"
           showName
+          applyCount={selected.size}
           onClose={() => setShowCreate(false)}
           onSubmit={createPreset}
         />

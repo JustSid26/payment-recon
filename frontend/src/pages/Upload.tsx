@@ -70,7 +70,9 @@ export default function Upload() {
       const res = await apiUpload<UploadResult>('/api/admin/upload', files)
       setResult(res)
       const okCount = res.files.filter((f) => f.ok).length
-      toastSuccess(`Imported ${okCount}/${res.files.length} file${res.files.length === 1 ? '' : 's'} — ${fmtInt(res.stats.txns)} transactions`)
+      const a = res.auto_settlements
+      const touched = (a?.generated ?? 0) + (a?.appended ?? 0)
+      toastSuccess(`Imported ${okCount}/${res.files.length} file${res.files.length === 1 ? '' : 's'} — ${fmtInt(res.stats.txns)} transactions${touched > 0 ? ` · ${fmtInt(touched)} settlement${touched === 1 ? '' : 's'} updated` : ''}`)
       setFiles([])
       // fresh data is now in the backend; lists/dashboard refetch on next navigation
     } catch (e) {
@@ -196,6 +198,18 @@ export default function Upload() {
                     {(result.stats.remembered_merchants ?? 0) === 1 ? '' : 's'} auto-configured from a
                     remembered fee schedule (matched a previously-set merchant id or name).
                   </span>
+                </div>
+              )}
+
+              {/* Settlements produced/updated automatically for configured merchants */}
+              {((result.auto_settlements?.generated ?? 0) + (result.auto_settlements?.appended ?? 0)) > 0 && (
+                <div className="callout" onClick={() => navigate('/settlements')} style={{ cursor: 'pointer', background: 'var(--green-bg)', borderColor: 'var(--green-border)' }}>
+                  <span>
+                    <b>{fmtInt((result.auto_settlements?.generated ?? 0) + (result.auto_settlements?.appended ?? 0))}</b> settlement
+                    {((result.auto_settlements?.generated ?? 0) + (result.auto_settlements?.appended ?? 0)) === 1 ? '' : 's'} updated automatically —
+                    new days were appended to each configured merchant's running settlement, no need to click Generate.
+                  </span>
+                  <span className="go">View settlements →</span>
                 </div>
               )}
 

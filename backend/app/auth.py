@@ -20,16 +20,31 @@ if not SECRET:
           "set TW_JWT_SECRET to keep sessions valid across restarts.")
 TTL = 12 * 3600  # demo-long
 
-DEMO_USERS = {
-    "admin@transactworld.com": {
-        "password": "demo123", "name": "TW Admin", "role": "admin",
-        "merchant_match": None,
-    },
-    "merchant@canamoney.com": {
-        "password": "demo123", "name": "Canamoney Finance", "role": "merchant",
-        "merchant_match": "CANAMONEY EXCHANGE LTD.",
-    },
-}
+def _seed_users() -> dict:
+    """Static login accounts. On a production box set TW_ADMIN_EMAIL + TW_ADMIN_PASSWORD
+    (and optionally TW_ADMIN_NAME): the box then has ONLY the configured admin(s) and no
+    demo backdoor merchant. TW_ADMIN_EMAIL may be a comma-separated list to seed several
+    admins that share TW_ADMIN_PASSWORD. With those env vars unset (the demo box), the
+    seeded demo admin + Canamoney merchant are used, so nothing changes."""
+    emails = [e.strip().lower() for e in os.environ.get("TW_ADMIN_EMAIL", "").split(",") if e.strip()]
+    pw = os.environ.get("TW_ADMIN_PASSWORD", "")
+    if emails and pw:
+        name = os.environ.get("TW_ADMIN_NAME", "Admin")
+        return {e: {"password": pw, "name": name, "role": "admin", "merchant_match": None}
+                for e in emails}
+    return {
+        "admin@coreservices.io": {
+            "password": "demo123", "name": "CoreServices Admin", "role": "admin",
+            "merchant_match": None,
+        },
+        "merchant@canamoney.com": {
+            "password": "demo123", "name": "Canamoney Finance", "role": "merchant",
+            "merchant_match": "CANAMONEY EXCHANGE LTD.",
+        },
+    }
+
+
+DEMO_USERS = _seed_users()
 
 
 def mint(sub: str, name: str, role: str,

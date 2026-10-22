@@ -16,6 +16,7 @@ from .auth import require_admin
 from .db import get_pool
 from .importer import Importer, build_name_map
 from . import onboarding as onboarding_mod
+from . import cycle as cycle_mod
 
 router = APIRouter(prefix="/api/admin")
 
@@ -131,8 +132,22 @@ def upload(user: dict = Depends(require_admin), files: list[UploadFile] = File(.
     if not csvs and not xlsxs:
         return {"ok": False, "error": "no .csv or .xlsx files in upload",
                 "files": [], "stats": {}, "integrity": integ if 'integ' in dir() else {}}
+
+    # Auto-generate settlements for already-configured merchants — the admin never
+    # has to click "Generate". Configured merchants' imported transactions settle
+    # into a day-wise report automatically; unconfigured ones are untouched.
+    auto = {"generated": 0, "existing": 0, "skipped": 0}
+    if any(f["ok"] for f in per_file):
+        try:
+            with get_pool().connection() as gconn:
+                gconn.row_factory = dict_row
+                auto = cycle_mod.generate_pending(gconn, generated_by="auto-import")
+        except Exception as ex:  # never fail an upload over auto-settlement
+            auto = {"generated": 0, "existing": 0, "skipped": 0, "error": str(ex)[:150]}
+
     return {"ok": all(f["ok"] for f in per_file), "files": per_file,
-            "stats": imp.stats, "integrity": integ, "status": st}
+            "stats": imp.stats, "integrity": integ, "status": st,
+            "auto_settlements": auto}
 
 
 def _delta(before: dict, after: dict) -> dict:

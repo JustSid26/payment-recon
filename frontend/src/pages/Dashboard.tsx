@@ -213,7 +213,7 @@ export default function Dashboard() {
           </div>
           <DataTable
             columns={recentSettlementCols}
-            rows={(settlements.data?.items ?? []).slice(0, 6)}
+            rows={(settlements.data?.items ?? []).filter((s) => s.state !== 'cancelled').slice(0, 6)}
             rowKey={(s) => s.settlement_uuid}
             loading={settlements.loading}
             onRowClick={(s) => navigate(`/settlements/${s.settlement_uuid}`)}

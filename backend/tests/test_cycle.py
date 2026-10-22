@@ -92,11 +92,11 @@ def test_settles_and_pays_out_after_t1(conn):
     s = _settlements(conn)
     assert len(s) == 1
     row = s[0]
-    # net = (payable - reserve_hold) minus the settlement fee. The fee is charged
-    # on everything EXCEPT the rolling reserve → its base is the payable, not the
-    # post-reserve subtotal.
+    # net = subtotal (payable - reserve_hold) minus the settlement fee. The fee is
+    # charged on the after-reserve SUBTOTAL — the rolling reserve is the merchant's
+    # own collateral and isn't fee-bearing.
     subtotal = payable - hold
-    fee = bps_of(payable, 100)
+    fee = bps_of(subtotal, 100)
     expected_net = subtotal - fee
     assert row["state"] == "completed"
     assert row["net_payout_minor"] == expected_net

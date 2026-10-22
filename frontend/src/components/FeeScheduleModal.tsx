@@ -45,7 +45,7 @@ export function feeFormFromSchedule(fs: FeeSchedule): FeeForm {
     reservePct: String(fs.reserve_hold_bps / 100),
     reserveDays: String(fs.reserve_hold_days),
     settlementPct: String(fs.settlement_fee_bps / 100),
-    delayDays: '0',
+    delayDays: String(fs.settlement_delay_days ?? 0),
   }
 }
 
@@ -87,6 +87,7 @@ export function FeeScheduleModal({
   saveLabel = 'Save',
   initial,
   showName,
+  applyCount = 0,
   onClose,
   onSubmit,
 }: {
@@ -95,11 +96,14 @@ export function FeeScheduleModal({
   saveLabel?: string
   initial?: FeeForm
   showName?: boolean
+  /** When > 0, offers an "also apply to N selected merchants" checkbox. */
+  applyCount?: number
   onClose: () => void
-  onSubmit: (rates: FeeRates, name: string) => Promise<void>
+  onSubmit: (rates: FeeRates, name: string, alsoApply: boolean) => Promise<void>
 }) {
   const [f, setF] = useState<FeeForm>(initial ?? EMPTY_FEE_FORM)
   const [name, setName] = useState('')
+  const [alsoApply, setAlsoApply] = useState(true)
   const [busy, setBusy] = useState(false)
   const [msg, setMsg] = useState<string | null>(null)
   const [presetSel, setPresetSel] = useState('')
@@ -125,7 +129,7 @@ export function FeeScheduleModal({
     setBusy(true)
     setMsg(null)
     try {
-      await onSubmit(buildRates(f), name.trim())
+      await onSubmit(buildRates(f), name.trim(), applyCount > 0 && alsoApply)
       onClose()
     } catch (e) {
       const m = e instanceof ApiError ? e.message : 'Failed to save'
@@ -192,6 +196,15 @@ export function FeeScheduleModal({
         <Field label="Settlement delay (T+days)" value={f.delayDays} on={(v) => set('delayDays', v)} ph="0" num />
       </div>
       <div className="dim small">Fixed fees are in the merchant's settlement currency.</div>
+
+      {applyCount > 0 && (
+        <label className="apply-check">
+          <input type="checkbox" checked={alsoApply} onChange={(e) => setAlsoApply(e.target.checked)} />
+          <span>Also apply to the <b>{applyCount}</b> selected merchant{applyCount === 1 ? '' : 's'} now
+            <span className="dim small"> — sets their fee schedule and posts any held transactions</span>
+          </span>
+        </label>
+      )}
     </Modal>
   )
 }

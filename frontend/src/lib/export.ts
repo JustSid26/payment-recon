@@ -13,7 +13,7 @@ export function toMajor(minor: number, currency: string): number {
   return minor / 10 ** currencyExponent(currency)
 }
 
-type Cell = string | number
+export type Cell = string | number
 
 function triggerDownload(blob: Blob, filename: string) {
   const url = URL.createObjectURL(blob)

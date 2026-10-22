@@ -18,6 +18,7 @@ import Reserve from './pages/Reserve'
 import RollingReserve from './pages/RollingReserve'
 import Upload from './pages/Upload'
 import Settings from './pages/Settings'
+import Insights from './pages/Insights'
 
 function RequireAuth({ children }: { children: React.ReactElement }) {
   const location = useLocation()
@@ -86,6 +87,7 @@ export default function App() {
           <Route path="/transactions/:uuid" element={<TransactionDetailPage />} />
           <Route path="/settlements" element={<Settlements />} />
           <Route path="/settlements/:uuid" element={<SettlementDetailPage />} />
+          <Route path="/insights" element={<Insights />} />
           <Route
             path="/rolling-reserve"
             element={

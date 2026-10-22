@@ -44,7 +44,10 @@ export function fmtDate(iso: string): string {
   if (!iso) return '—'
   const d = new Date(iso)
   if (isNaN(d.getTime())) return iso
-  return d.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' })
+  // Settlement windows / processing dates are UTC dates (the DB stores and groups
+  // them in UTC). Render in UTC so a timestamp like "...23:59:59Z" doesn't roll to
+  // the next day for viewers east of UTC (e.g. IST) — matches fmtDateTime.
+  return d.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric', timeZone: 'UTC' })
 }
 
 export function fmtDateTime(iso: string): string {
