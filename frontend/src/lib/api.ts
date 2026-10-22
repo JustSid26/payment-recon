@@ -84,8 +84,21 @@ export async function api<T>(path: string, opts: RequestOptions = {}): Promise<T
   }
 
   if (!res.ok) {
-    const err = (data as { error?: { code?: string; message?: string } } | null)?.error
-    throw new ApiError(res.status, err?.code ?? 'error', err?.message ?? `Request failed (${res.status})`)
+    // Our handlers raise HTTPException(detail={"error": {...}}), which FastAPI
+    // serialises as {"detail": {"error": {...}}}. Older callers also returned a
+    // top-level {"error": {...}}, so accept both shapes. FastAPI's own validation
+    // errors put a string (or list) under `detail` — fall back to that too.
+    const body = data as
+      | { error?: { code?: string; message?: string }
+          detail?: { error?: { code?: string; message?: string } } | string }
+      | null
+    const err = body?.error ?? (typeof body?.detail === 'object' ? body?.detail?.error : undefined)
+    const detailStr = typeof body?.detail === 'string' ? body.detail : undefined
+    throw new ApiError(
+      res.status,
+      err?.code ?? 'error',
+      err?.message ?? detailStr ?? `Request failed (${res.status})`,
+    )
   }
 
   return data as T

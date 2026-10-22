@@ -9,8 +9,11 @@ import pytest
 from psycopg.rows import dict_row
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1]))
+from datetime import datetime, timezone  # noqa: E402
+
 from app.importer import Importer  # noqa: E402
 from app import onboarding as ob  # noqa: E402
+from app import cycle as cycle_mod  # noqa: E402
 
 ADMIN_DSN = "postgresql://tw:tw@localhost:5455/twledger"
 DSN = "postgresql://tw:tw@localhost:5455/twledger_quarantine_test"
@@ -162,3 +165,33 @@ def test_recalculate_reposts_at_current_schedule(conn):
         SELECT event_id FROM ledger_entries GROUP BY event_id
         HAVING SUM(CASE direction WHEN 'debit' THEN amount_minor ELSE -amount_minor END) <> 0) x""")
     assert bad["n"] == 0
+
+
+def test_delay_only_change_allowed_after_settlement(conn):
+    """A settlement-timing-only edit (T+days) must succeed even once the merchant's
+    transactions are already settled — it moves no posted money, it only governs
+    when FUTURE events settle. An AMOUNT change on the same settled merchant must
+    still be refused by the append-only re-price guard. (Regression: the fee modal
+    returned 400 for any save on a merchant that already had a settlement.)"""
+    Importer(conn)._commit_chunk([row("d1", "55001", "Delay Co")], "t.csv", {})
+    mid = one(conn, "SELECT id FROM merchants WHERE member_id='55001'")["id"]
+    ob.assign_fee_schedule(conn, mid, ob.resolve_rates(
+        overrides={"mdr_bps": 300, "settlement_delay_days": 0}))
+    # settle everything (cutoff well past the June capture date)
+    cycle_mod.generate_pending(conn, cutoff=datetime(2026, 12, 1, tzinfo=timezone.utc),
+                               merchant_ids=[mid])
+    assert one(conn, """SELECT COUNT(*) c FROM settlement_items si
+                          JOIN ledger_events e ON e.id=si.event_id
+                         WHERE e.merchant_id=%s""", (mid,))["c"] >= 1
+
+    # delay-only change (same amounts, T+0 -> T+1): allowed, no reverse attempted
+    summary = ob.assign_fee_schedule(conn, mid, ob.resolve_rates(
+        overrides={"mdr_bps": 300, "settlement_delay_days": 1}))
+    assert summary["transactions_repriced"] == 0
+    assert one(conn, "SELECT settlement_delay_days d FROM fee_schedules WHERE merchant_id=%s",
+               (mid,))["d"] == 1
+
+    # an AMOUNT change on the settled merchant is still refused
+    with pytest.raises(ValueError, match="already"):
+        ob.assign_fee_schedule(conn, mid, ob.resolve_rates(
+            overrides={"mdr_bps": 500, "settlement_delay_days": 1}))

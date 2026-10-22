@@ -51,13 +51,19 @@ def _validate_rates(r: dict) -> None:
 
 
 def assign_fee_schedule(conn: psycopg.Connection, merchant_id: int, rates: dict,
-                        *, reprocess: bool = True) -> dict:
+                        *, reprocess: bool = True, force_reprice: bool = False) -> dict:
     """Set (or replace) a merchant's fee schedule and activate them.
 
     If the merchant already has posted (but unsettled) transactions, they are
     RE-PRICED: the old ledger events are reversed and the transactions replayed
     under the new schedule, so a rate change (e.g. rolling reserve 5%→20%) is
-    actually reflected. Refuses if any transaction is already settled."""
+    actually reflected. Refuses if any transaction is already settled.
+
+    A change that touches only settlement TIMING (delay / schedule) posts no new
+    money and only governs when future events settle, so it skips the reverse and
+    is NOT blocked by the already-settled guard. `force_reprice=True` overrides
+    this (used by recalculate() to re-post at an unchanged schedule after a
+    posting-formula change)."""
     # Activation, re-price and replay run in ONE transaction: if anything fails
     # (e.g. a bad schedule) it all rolls back, so a merchant is never stranded.
     with conn.transaction():
@@ -65,6 +71,15 @@ def assign_fee_schedule(conn: psycopg.Connection, merchant_id: int, rates: dict,
         cur.execute("SELECT id FROM merchants WHERE id=%s FOR UPDATE", (merchant_id,))
         if cur.fetchone() is None:
             raise ValueError("merchant not found")
+        # Only an AMOUNT change (MDR, fees, reserve, settlement fee) needs the
+        # posted events reversed and replayed. A settlement-timing-only change
+        # (delay / schedule) touches no posted money and only governs when FUTURE
+        # events settle, so it must not trip the "already settled" re-price guard.
+        cur.execute("SELECT * FROM fee_schedules WHERE merchant_id=%s", (merchant_id,))
+        old = cur.fetchone()
+        amount_fields = [c for c in FEE_COLUMNS
+                         if c not in ("settlement_delay_days", "settlement_schedule")]
+        amounts_changed = old is None or any(old[c] != rates[c] for c in amount_fields)
         cur.execute("DELETE FROM fee_schedules WHERE merchant_id=%s", (merchant_id,))
         insert_fee_schedule(cur, merchant_id, rates)
         cur.execute("UPDATE merchants SET status='active' WHERE id=%s", (merchant_id,))
@@ -73,7 +88,8 @@ def assign_fee_schedule(conn: psycopg.Connection, merchant_id: int, rates: dict,
         cur.execute("SELECT member_id, name FROM merchants WHERE id=%s", (merchant_id,))
         m = cur.fetchone()
         remember_rates(cur, m["member_id"], m["name"], rates)
-        repriced = _reverse_posted(conn, cur, merchant_id) if reprocess else 0
+        repriced = (_reverse_posted(conn, cur, merchant_id)
+                    if (reprocess and (amounts_changed or force_reprice)) else 0)
         posted = _reprocess_body(conn, cur, merchant_id) if reprocess else 0
     return {"merchant_id": merchant_id, "transactions_posted": posted,
             "transactions_repriced": repriced}
@@ -193,7 +209,7 @@ def recalculate(conn: psycopg.Connection, merchant_id: int) -> dict:
     rates = schedule_rates(conn, merchant_id)
     if rates is None:
         raise ValueError("merchant has no fee schedule")
-    return assign_fee_schedule(conn, merchant_id, rates)
+    return assign_fee_schedule(conn, merchant_id, rates, force_reprice=True)
 
 
 def unconfigured_merchants(conn: psycopg.Connection) -> list[dict]:
