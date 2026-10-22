@@ -80,6 +80,9 @@ def assign_fee_schedule(conn: psycopg.Connection, merchant_id: int, rates: dict,
         amount_fields = [c for c in FEE_COLUMNS
                          if c not in ("settlement_delay_days", "settlement_schedule")]
         amounts_changed = old is None or any(old[c] != rates[c] for c in amount_fields)
+        timing_changed = old is not None and (
+            old["settlement_delay_days"] != rates["settlement_delay_days"]
+            or old["settlement_schedule"] != rates["settlement_schedule"])
         cur.execute("DELETE FROM fee_schedules WHERE merchant_id=%s", (merchant_id,))
         insert_fee_schedule(cur, merchant_id, rates)
         cur.execute("UPDATE merchants SET status='active' WHERE id=%s", (merchant_id,))
@@ -88,31 +91,55 @@ def assign_fee_schedule(conn: psycopg.Connection, merchant_id: int, rates: dict,
         cur.execute("SELECT member_id, name FROM merchants WHERE id=%s", (merchant_id,))
         m = cur.fetchone()
         remember_rates(cur, m["member_id"], m["name"], rates)
-        repriced = (_reverse_posted(conn, cur, merchant_id)
-                    if (reprocess and (amounts_changed or force_reprice)) else 0)
+        if reprocess and (amounts_changed or force_reprice):
+            # amount re-price: reverse EVERY posted event (refuses if any settled)
+            repriced = _reverse_posted(conn, cur, merchant_id)
+        elif reprocess and timing_changed:
+            # settlement-timing-only change: re-stamp settle_after on the still-open
+            # (unsettled) transactions so a T+N change actually re-times them;
+            # already-settled days keep their history.
+            repriced = _reverse_posted(conn, cur, merchant_id, only_unsettled=True)
+        else:
+            repriced = 0
         posted = _reprocess_body(conn, cur, merchant_id) if reprocess else 0
     return {"merchant_id": merchant_id, "transactions_posted": posted,
             "transactions_repriced": repriced}
 
 
-def _reverse_posted(conn: psycopg.Connection, cur, merchant_id: int) -> int:
+def _reverse_posted(conn: psycopg.Connection, cur, merchant_id: int,
+                    *, only_unsettled: bool = False) -> int:
     """Reverse a merchant's already-posted transaction events so they can be
     replayed under a new schedule. Append-only safe (posts reversal events, never
-    deletes). Refuses if any of those events are already in a settlement."""
-    cur.execute("""SELECT COUNT(*) AS n FROM settlement_items si
-                     JOIN ledger_events e ON e.id=si.event_id
-                    WHERE e.merchant_id=%s""", (merchant_id,))
-    if cur.fetchone()["n"] > 0:
-        raise ValueError(
-            "cannot change rates: some of this merchant's transactions are already "
-            "settled. Reset the demo (or re-import) and set the rate before settling.")
-    # posting events (linked to a transaction) not already reversed
-    cur.execute("""SELECT e.id, e.currency, e.occurred_at, e.source_txn_id
+    deletes the originals).
+
+    Default: reverses EVERY posted event and refuses if any is already settled —
+    used for an amount re-price, which can't be applied to only some transactions.
+
+    only_unsettled=True: reverses only events NOT yet in a settlement and leaves
+    settled ones intact. Used for a settlement-timing-only change (delay/schedule):
+    the replay re-stamps settle_after on the still-open transactions at the new
+    delay (ledger_events.settle_after is immutable, so re-timing means replay), so
+    a T+3→T+0 switch actually releases the held days — while already-paid days keep
+    their history."""
+    if not only_unsettled:
+        cur.execute("""SELECT COUNT(*) AS n FROM settlement_items si
+                         JOIN ledger_events e ON e.id=si.event_id
+                        WHERE e.merchant_id=%s""", (merchant_id,))
+        if cur.fetchone()["n"] > 0:
+            raise ValueError(
+                "cannot change rates: some of this merchant's transactions are already "
+                "settled. Reset the demo (or re-import) and set the rate before settling.")
+    # posting events (linked to a transaction) not already reversed; for a timing
+    # change, skip any that are already locked into a settlement.
+    settled_filter = ("AND NOT EXISTS (SELECT 1 FROM settlement_items si "
+                      "WHERE si.event_id=e.id)" if only_unsettled else "")
+    cur.execute(f"""SELECT e.id, e.currency, e.occurred_at, e.source_txn_id
                      FROM ledger_events e
                     WHERE e.merchant_id=%s AND e.source_txn_id IS NOT NULL
                       AND e.reverses_event_id IS NULL
                       AND NOT EXISTS (SELECT 1 FROM ledger_events r
                                        WHERE r.reverses_event_id=e.id)
+                      {settled_filter}
                     ORDER BY e.id""", (merchant_id,))
     events = cur.fetchall()
     if not events:
@@ -134,8 +161,14 @@ def _reverse_posted(conn: psycopg.Connection, cur, merchant_id: int) -> int:
     cur.execute("DELETE FROM fees WHERE ledger_event_id = ANY(%s)", (eids,))
     cur.execute("DELETE FROM reserve_holds WHERE hold_event_id = ANY(%s)", (eids,))
     cur.execute("DELETE FROM posting_idempotency WHERE event_id = ANY(%s)", (eids,))
-    cur.execute("UPDATE transactions SET ledger_posted=false "
-                "WHERE merchant_id=%s AND ledger_posted=true", (merchant_id,))
+    if only_unsettled:
+        # only the transactions we actually reversed go back to unposted
+        txn_ids = list({e["source_txn_id"] for e in events})
+        cur.execute("UPDATE transactions SET ledger_posted=false "
+                    "WHERE merchant_id=%s AND id = ANY(%s)", (merchant_id, txn_ids))
+    else:
+        cur.execute("UPDATE transactions SET ledger_posted=false "
+                    "WHERE merchant_id=%s AND ledger_posted=true", (merchant_id,))
     return len(events)
 
 

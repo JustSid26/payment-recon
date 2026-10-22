@@ -14,6 +14,7 @@ from datetime import datetime, timezone  # noqa: E402
 from app.importer import Importer  # noqa: E402
 from app import onboarding as ob  # noqa: E402
 from app import cycle as cycle_mod  # noqa: E402
+from app.bizcal import next_settlement_datetime  # noqa: E402
 
 ADMIN_DSN = "postgresql://tw:tw@localhost:5455/twledger"
 DSN = "postgresql://tw:tw@localhost:5455/twledger_quarantine_test"
@@ -195,3 +196,51 @@ def test_delay_only_change_allowed_after_settlement(conn):
     with pytest.raises(ValueError, match="already"):
         ob.assign_fee_schedule(conn, mid, ob.resolve_rates(
             overrides={"mdr_bps": 500, "settlement_delay_days": 1}))
+
+
+def test_lowering_delay_retimes_unsettled_days(conn):
+    """Lowering T+N must re-time the still-open (unsettled) transactions so the
+    held days release, while already-settled days keep their place. (Regression:
+    after switching a merchant from T+3 to T+0, later processing days stayed stuck
+    at their old T+3 settle_after and never appeared in the settlement.)"""
+    def drow(pid, dt):
+        r = row(pid, "44001", "Retime Co")
+        r["Transaction Date(MM/DD/YYYY)"] = dt
+        return r
+    # two processing days: Tue 9 Jun and Wed 10 Jun
+    Importer(conn)._commit_chunk(
+        [drow("ra", "09-06-2026 10:00"), drow("rb", "10-06-2026 10:00")], "t.csv", {})
+    mid = one(conn, "SELECT id FROM merchants WHERE member_id='44001'")["id"]
+    ob.assign_fee_schedule(conn, mid, ob.resolve_rates(
+        overrides={"mdr_bps": 300, "settlement_delay_days": 3}))
+
+    # settle ONLY day 1 (cutoff = day-1's T+3; day-2's T+3 is still in the future)
+    d1 = datetime(2026, 6, 9, 10, 0, tzinfo=timezone.utc)
+    cycle_mod.generate_pending(conn, cutoff=next_settlement_datetime(d1, 3),
+                               merchant_ids=[mid])
+    assert one(conn, """SELECT COUNT(DISTINCT date(e.occurred_at)) d
+                          FROM settlement_items si JOIN ledger_events e ON e.id=si.event_id
+                         WHERE e.merchant_id=%s""", (mid,))["d"] == 1
+
+    # switch T+3 -> T+0: the unsettled day-2 txn must be re-timed
+    summary = ob.assign_fee_schedule(conn, mid, ob.resolve_rates(
+        overrides={"mdr_bps": 300, "settlement_delay_days": 0}))
+    assert summary["transactions_repriced"] >= 1
+
+    # day-2 capture now settles at T+0 (settle_after == its own processing date),
+    # no longer the old T+3 date
+    sa = one(conn, """SELECT date(e.settle_after) sa
+                        FROM ledger_events e
+                       WHERE e.merchant_id=%s AND e.event_type='payment_captured'
+                         AND date(e.occurred_at)='2026-06-10'
+                         AND e.reverses_event_id IS NULL
+                         AND NOT EXISTS (SELECT 1 FROM ledger_events r
+                                          WHERE r.reverses_event_id=e.id)""", (mid,))["sa"]
+    assert str(sa) == "2026-06-10"
+
+    # and it now settles immediately on the next cycle
+    cycle_mod.generate_pending(conn, cutoff=datetime(2026, 12, 1, tzinfo=timezone.utc),
+                               merchant_ids=[mid])
+    assert one(conn, """SELECT COUNT(DISTINCT date(e.occurred_at)) d
+                          FROM settlement_items si JOIN ledger_events e ON e.id=si.event_id
+                         WHERE e.merchant_id=%s""", (mid,))["d"] == 2
