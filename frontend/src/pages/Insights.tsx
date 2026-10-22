@@ -174,22 +174,92 @@ function DonutBlock({ heading, segments }: { heading: string; segments: Seg[] })
   )
 }
 
+type PickedMerchant = { uuid: string; name: string }
+
 export default function Insights() {
+  const isAdmin = getUser()?.role === 'admin'
+  const [selected, setSelected] = useState<PickedMerchant | null>(null)
+  // Admins pick a merchant first (portfolio is too broad to read as one blob);
+  // merchant users go straight to their own insights.
+  if (isAdmin && !selected) return <MerchantLanding onPick={setSelected} />
+  return <InsightsDetail merchant={selected} onBack={isAdmin ? () => setSelected(null) : undefined} />
+}
+
+// Admin landing: one metric card per merchant, click to drill into its insights.
+function MerchantLanding({ onPick }: { onPick: (m: PickedMerchant) => void }) {
+  const { data, loading } = useApi(() => api<MerchantsResponse>('/api/insights/merchants'), [])
+  const list = data?.merchants ?? []
+  return (
+    <div className="stack">
+      <div className="page-head">
+        <div>
+          <h1>Insights</h1>
+          <div className="sub">Pick a merchant to see where their card volume comes from</div>
+        </div>
+      </div>
+      {loading && !data && <LoadingBlock label="Loading merchants…" />}
+      {data && list.length === 0 && (
+        <EmptyState title="No merchants to analyse yet" hint="Insights appear once transactions are imported." />
+      )}
+      {list.length > 0 && (
+        <div className="insights-merchant-grid">
+          {list.map((m) => {
+            const sig = rateSignal(m.acceptance_rate)
+            return (
+              <button
+                key={m.merchant_uuid}
+                className="minsight-card"
+                onClick={() => onPick({ uuid: m.merchant_uuid, name: m.name })}
+              >
+                <div className="minsight-top">
+                  <span className="minsight-name" title={m.name}>{m.name}</span>
+                  <span className={`signal-chip ${sig.signal}`}>{sig.label}</span>
+                </div>
+                <AcceptBar rate={m.acceptance_rate} signal={sig.signal} />
+                <div className="minsight-stats">
+                  <div><span className="dim small">Transactions</span><b className="num">{fmtInt(m.transactions)}</b></div>
+                  <div><span className="dim small">Accepted</span><b className="num" style={{ color: 'var(--green)' }}>{fmtInt(m.accepted)}</b></div>
+                  <div><span className="dim small">Declined</span><b className="num" style={{ color: 'var(--red)' }}>{fmtInt(m.declined)}</b></div>
+                </div>
+                {m.captured.length > 0 && (
+                  <div className="minsight-cap">
+                    {m.captured.map((v) => (
+                      <span key={v.currency} className="cap-tag"><span className="ccy-tag">{v.currency}</span> {fmtMoney(v.minor, v.currency)}</span>
+                    ))}
+                  </div>
+                )}
+                <span className="minsight-go">View insights →</span>
+              </button>
+            )
+          })}
+        </div>
+      )}
+    </div>
+  )
+}
+
+function InsightsDetail({ merchant, onBack }: { merchant: PickedMerchant | null; onBack?: () => void }) {
   const [currency, setCurrency] = useState('')
+  // Compose the shared query string (currency filter + optional merchant scope).
+  const qs = (() => {
+    const p = new URLSearchParams()
+    if (currency) p.set('currency', currency)
+    if (merchant) p.set('merchant', merchant.uuid)
+    const s = p.toString()
+    return s ? `?${s}` : ''
+  })()
   const { data, loading } = useApi(
-    () => api<CountryInsights>(`/api/insights/countries${currency ? `?currency=${currency}` : ''}`),
-    [currency],
+    () => api<CountryInsights>(`/api/insights/countries${qs}`),
+    [currency, merchant?.uuid],
   )
   const { data: ml } = useApi(
-    () => api<MLInsights>(`/api/insights/ml${currency ? `?currency=${currency}` : ''}`),
-    [currency],
+    () => api<MLInsights>(`/api/insights/ml${qs}`),
+    [currency, merchant?.uuid],
   )
   const { data: issuers } = useApi(
-    () => api<IssuersResponse>(`/api/insights/issuers${currency ? `?currency=${currency}` : ''}`),
-    [currency],
+    () => api<IssuersResponse>(`/api/insights/issuers${qs}`),
+    [currency, merchant?.uuid],
   )
-  const { data: merchants } = useApi(() => api<MerchantsResponse>('/api/insights/merchants'), [])
-  const isAdmin = getUser()?.role === 'admin'
   const [open, setOpen] = useState<Set<string>>(new Set())
 
   // Keep the "Not provided" bucket last — it isn't an actionable market.
@@ -238,16 +308,10 @@ export default function Insights() {
       ...(issuers?.banks ?? []).map((b) => [b.bank, b.bin_count, b.transactions, b.accepted, b.declined,
         b.acceptance_rate != null ? Math.round(b.acceptance_rate * 100) : '', b.top_brand ? brandLabel(b.top_brand) : '']),
     ]
-    const byMerchant: Cell[][] = [
-      ['Merchant', 'Transactions', 'Accepted', 'Declined', 'Acceptance %', 'Captured'],
-      ...(merchants?.merchants ?? []).map((m) => [m.name, m.transactions, m.accepted, m.declined,
-        m.acceptance_rate != null ? Math.round(m.acceptance_rate * 100) : '', capStr(m.captured)]),
-    ]
-    downloadExcelWorkbook('insights-report', [
+    downloadExcelWorkbook(merchant ? `insights-${merchant.name}` : 'insights-report', [
       { name: 'Summary', rows: summary },
       { name: 'By country', rows: byCountry },
       { name: 'By issuer', rows: byIssuer },
-      { name: 'By merchant', rows: byMerchant },
     ])
   }
 
@@ -257,8 +321,11 @@ export default function Insights() {
     <div className="stack">
       <div className="page-head">
         <div>
-          <h1>Insights</h1>
-          <div className="sub">Where your card volume comes from — and where to grow</div>
+          {onBack && (
+            <button className="btn sm" onClick={onBack} style={{ marginBottom: 10 }}>← All merchants</button>
+          )}
+          <h1>{merchant ? merchant.name : 'Insights'}</h1>
+          <div className="sub">Where {merchant ? 'their' : 'your'} card volume comes from — and where to grow</div>
         </div>
         {data && (
           <div className="head-actions">
@@ -378,7 +445,7 @@ export default function Insights() {
                                 />
                               </div>
                               {mlc && <PredictionBlock mlc={mlc} />}
-                              {isOpen && <CountryIssuers country={c.country} currency={currency} />}
+                              {isOpen && <CountryIssuers country={c.country} currency={currency} merchant={merchant?.uuid} />}
                             </td>
                           </tr>
                         )}
@@ -397,44 +464,6 @@ export default function Insights() {
           </div>
 
 
-          {/* By merchant (consolidated across all currencies) */}
-          {isAdmin && merchants && merchants.merchants.length > 0 && (
-            <div className="card">
-              <div className="card-title">By merchant <span className="dim small">consolidated · all currencies</span></div>
-              <div className="table-wrap">
-                <table className="data insights-table">
-                  <thead>
-                    <tr>
-                      <th>Merchant</th>
-                      <th className="r">Transactions</th>
-                      <th className="r">Accepted</th>
-                      <th className="r">Declined</th>
-                      <th>Acceptance</th>
-                      <th>Captured</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {merchants.merchants.map((m) => (
-                      <tr key={m.merchant_uuid}>
-                        <td><span className="bank-name">{m.name}</span></td>
-                        <td className="r num">{fmtInt(m.transactions)}</td>
-                        <td className="r num" style={{ color: 'var(--green)' }}>{fmtInt(m.accepted)}</td>
-                        <td className="r num" style={{ color: 'var(--red)' }}>{fmtInt(m.declined)}</td>
-                        <td><AcceptBar rate={m.acceptance_rate} signal={rateSignal(m.acceptance_rate).signal} /></td>
-                        <td>
-                          <div className="cap-list">
-                            {m.captured.map((v) => (
-                              <span key={v.currency} className="cap-tag"><span className="ccy-tag">{v.currency}</span> {fmtMoney(v.minor, v.currency)}</span>
-                            ))}
-                          </div>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            </div>
-          )}
         </>
       )}
     </div>
@@ -557,10 +586,10 @@ function PredictionBlock({ mlc }: { mlc: MLCountry }) {
 }
 
 // Lazy-loaded issuing-bank breakdown for one country (only fetched on expand).
-function CountryIssuers({ country, currency }: { country: string; currency: string }) {
+function CountryIssuers({ country, currency, merchant }: { country: string; currency: string; merchant?: string }) {
   const { data, loading } = useApi(
-    () => api<IssuersResponse>(`/api/insights/issuers?country=${encodeURIComponent(country)}${currency ? `&currency=${currency}` : ''}`),
-    [country, currency],
+    () => api<IssuersResponse>(`/api/insights/issuers?country=${encodeURIComponent(country)}${currency ? `&currency=${currency}` : ''}${merchant ? `&merchant=${merchant}` : ''}`),
+    [country, currency, merchant],
   )
   if (loading && !data) {
     return <div className="issuers-block"><div className="mini-head">🏦 Issuing banks</div><div className="dim small">Loading…</div></div>

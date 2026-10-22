@@ -1342,6 +1342,28 @@ table.data tbody tr.click:hover { background: #f8faff; }
 .accept-fill.neutral { background: #98a2b3; }
 .accept-pct { font-size: 12.5px; font-weight: 600; color: var(--ink); min-width: 32px; font-variant-numeric: tabular-nums; }
 
+/* Admin Insights landing: one metric card per merchant */
+.insights-merchant-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: 16px;
+}
+.minsight-card {
+  display: flex; flex-direction: column; gap: 12px;
+  text-align: left; cursor: pointer;
+  background: var(--card, #fff); border: 1px solid var(--border); border-radius: 14px;
+  padding: 18px; font: inherit; color: inherit;
+  transition: border-color .15s, box-shadow .15s, transform .15s;
+}
+.minsight-card:hover { border-color: var(--blue-border, #84caff); box-shadow: var(--elev-md, 0 6px 18px rgba(16,24,40,.08)); transform: translateY(-1px); }
+.minsight-card:focus-visible { outline: 2px solid var(--blue, #2e90fa); outline-offset: 2px; }
+.minsight-top { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.minsight-name { font-weight: 600; font-size: 15px; color: var(--ink); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.minsight-stats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+.minsight-stats > div { display: flex; flex-direction: column; gap: 2px; }
+.minsight-cap { display: flex; flex-wrap: wrap; gap: 6px; }
+.minsight-go { font-size: 13px; font-weight: 600; color: var(--blue, #2e90fa); margin-top: auto; }
+
 .signal-chip {
   display: inline-block; font-size: 11.5px; font-weight: 600; padding: 3px 9px; border-radius: 999px;
   border: 1px solid var(--border);

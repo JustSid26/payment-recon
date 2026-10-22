@@ -334,15 +334,17 @@ def dashboard(user: dict = Depends(current_user)):
 
 
 @app.get("/api/insights/countries")
-def insights_countries(currency: str | None = None, user: dict = Depends(current_user)):
+def insights_countries(currency: str | None = None, merchant: str | None = None,
+                       user: dict = Depends(current_user)):
     """Country-level performance of the card portfolio: per-country transaction
     counts, accept/decline split, brand mix and captured volume. Merchants see
-    only their own data; admins see the whole book."""
+    only their own data; admins see the whole book, or one merchant via `merchant`
+    (its uuid)."""
     from . import ml
     ctry = ml.country_case("t.country")     # normalise USA/UNITED STATES→US etc., blank→??
     with get_pool().connection() as conn:
         cur = conn.cursor()
-        mid = user["merchant_id"] if user["role"] == "merchant" else None
+        mid = scope_merchant_id(user, merchant, cur)
         p: dict = {"mid": mid, "ccy": currency.upper() if currency else None}
         filt = ""
         if mid:
@@ -431,14 +433,16 @@ def insights_countries(currency: str | None = None, user: dict = Depends(current
 
 
 @app.get("/api/insights/ml")
-def insights_ml(currency: str | None = None, user: dict = Depends(current_user)):
+def insights_ml(currency: str | None = None, merchant: str | None = None,
+                user: dict = Depends(current_user)):
     """ML layer for Insights: predicted (mix-based) approval + decline drivers per
     country, statistical anomalies, recoverable-revenue sizing, and market
-    cohorts. Scoped to the merchant for merchant users."""
+    cohorts. Scoped to the merchant for merchant users, or to one merchant (admin,
+    via `merchant` uuid)."""
     from . import ml
     with get_pool().connection() as conn:
         cur = conn.cursor()
-        mid = user["merchant_id"] if user["role"] == "merchant" else None
+        mid = scope_merchant_id(user, merchant, cur)
         return ml.compute(cur, mid, currency)
 
 
@@ -448,14 +452,15 @@ _DECIDED = [*_APPROVED, "auth_failed"]
 
 @app.get("/api/insights/issuers")
 def insights_issuers(currency: str | None = None, country: str | None = None,
-                     user: dict = Depends(current_user)):
+                     merchant: str | None = None, user: dict = Depends(current_user)):
     """Issuing-bank / BIN performance: per bank (transactions, accept/decline,
     acceptance, top brand) with its individual BINs nested underneath. Optionally
-    scoped to a single country (its ISO-2 code)."""
+    scoped to a single country (its ISO-2 code), and to one merchant (admin, via
+    `merchant` uuid)."""
     from . import ml
     with get_pool().connection() as conn:
         cur = conn.cursor()
-        mid = user["merchant_id"] if user["role"] == "merchant" else None
+        mid = scope_merchant_id(user, merchant, cur)
         p = {"mid": mid, "ccy": currency.upper() if currency else None,
              "country": country.upper() if country else None, "app": _APPROVED, "all": _DECIDED}
         filt = (" AND merchant_id = %(mid)s" if mid else "") + (" AND currency = %(ccy)s" if currency else "")
