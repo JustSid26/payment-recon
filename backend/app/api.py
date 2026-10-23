@@ -1580,13 +1580,14 @@ def mail_oauth_callback(request: Request, code: str | None = None,
     if not rt:
         return back("mail_error=no_refresh_token")
     updates = {"TW_GMAIL_REFRESH_TOKEN": rt, "TW_MAIL_ENABLED": ""}
-    # Capture the authorized mailbox from the id_token and use it as the From address
-    # (unless one is already set) so a single click fully configures sending.
+    # Capture the authorized mailbox from the id_token and use it as the From address.
+    # Always follow the account that was just connected, so reconnecting / switching
+    # to a different Gmail updates the sender (previously it stuck to the first one).
     try:
         email = jwt.decode(tok.get("id_token", ""), options={"verify_signature": False}).get("email")
     except Exception:
         email = None
-    if email and not mailer_mod._cfg("TW_MAIL_FROM"):
+    if email:
         updates["TW_MAIL_FROM"] = f"CoreServices <{email}>"
     with get_pool().connection() as conn:
         settings_store_mod.save(conn, updates)
