@@ -743,6 +743,7 @@ function DailyView({ days, loading, s, items, baseName, canConfirm, onConfirm, d
   const ccy = s.currency
   const fs = s.fee_schedule
   const [selectedDate, setSelectedDate] = useState('')
+  const [dayQ, setDayQ] = useState('')
 
   const settlementPaid = s.state === 'completed'
   // Per-day payout state: each processing day can be paid on its own from its
@@ -821,8 +822,16 @@ function DailyView({ days, loading, s, items, baseName, canConfirm, onConfirm, d
             <span>Daily payout days</span>
             <span className="dim small">{fmtInt(days.length)} days</span>
           </div>
+          <div className="daily-day-search">
+            <input
+              className="input sm"
+              placeholder="Search a date…"
+              value={dayQ}
+              onChange={(e) => setDayQ(e.target.value)}
+            />
+          </div>
           <div className="daily-day-options">
-            {days.map((d) => {
+            {(dayQ.trim() ? days.filter((d) => fmtDate(d.date).toLowerCase().includes(dayQ.trim().toLowerCase())) : days).map((d) => {
               return (
                 <button
                   key={d.date}
@@ -1211,6 +1220,7 @@ function M({ minor, ccy, strong }: { minor: number; ccy: string; strong?: boolea
 }
 
 function LinesView({ items, loading, ccy }: { items: SettlementLineItem[]; loading: boolean; ccy: string }) {
+  const [q, setQ] = useState('')
   if (loading) return <LoadingBlock label="Loading transactions…" />
   if (items.length === 0)
     return (
@@ -1219,11 +1229,33 @@ function LinesView({ items, loading, ccy }: { items: SettlementLineItem[]; loadi
       </div>
     )
 
+  const needle = q.trim().toLowerCase()
+  const rows = needle
+    ? items.filter((it) =>
+        (it.reference || '').toLowerCase().includes(needle) ||
+        (it.brand || '').toLowerCase().includes(needle) ||
+        (it.last_four || '').includes(needle) ||
+        typeLabel(it.type).toLowerCase().includes(needle) ||
+        (it.status || '').toLowerCase().includes(needle) ||
+        fmtDateTime(it.occurred_at).toLowerCase().includes(needle))
+    : items
+
   const sum = (k: keyof SettlementLineItem) =>
-    items.reduce((a, it) => a + (typeof it[k] === 'number' ? (it[k] as number) : 0), 0)
+    rows.reduce((a, it) => a + (typeof it[k] === 'number' ? (it[k] as number) : 0), 0)
 
   return (
     <div className="card" style={{ padding: 0 }}>
+      <div className="lines-toolbar" data-print="hide">
+        <input
+          className="input sm"
+          placeholder="Search reference, brand, last 4, type, date…"
+          value={q}
+          onChange={(e) => setQ(e.target.value)}
+        />
+        <span className="dim small num">
+          {needle ? `${fmtInt(rows.length)} of ${fmtInt(items.length)}` : `${fmtInt(items.length)} transactions`}
+        </span>
+      </div>
       <div className="lines-wrap">
         <table className="lines-table">
           <thead>
@@ -1244,7 +1276,9 @@ function LinesView({ items, loading, ccy }: { items: SettlementLineItem[]; loadi
             </tr>
           </thead>
           <tbody>
-            {items.map((it, i) => (
+            {rows.length === 0 ? (
+              <tr><td className="l" colSpan={13} style={{ textAlign: 'center', padding: 28, color: 'var(--ink-3)' }}>No transactions match “{q}”.</td></tr>
+            ) : rows.map((it, i) => (
               <tr key={i}>
                 <td className="l">{fmtDateTime(it.occurred_at)}</td>
                 <td className="l">{typeLabel(it.type)}</td>
@@ -1264,7 +1298,7 @@ function LinesView({ items, loading, ccy }: { items: SettlementLineItem[]; loadi
           </tbody>
           <tfoot>
             <tr>
-              <td className="l" colSpan={5}>{fmtInt(items.length)} transactions</td>
+              <td className="l" colSpan={5}>{fmtInt(rows.length)} transactions</td>
               <td>{fmtMoney(sum('gross_minor'), ccy)}</td>
               <td>{fmtMoney(sum('mdr_minor'), ccy)}</td>
               <td>{fmtMoney(sum('approved_fee_minor'), ccy)}</td>
