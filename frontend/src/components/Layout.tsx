@@ -4,12 +4,6 @@ import { api, ApiError, clearSession, getUser } from '../lib/api'
 import { Modal, toastError, toastSuccess } from './ui'
 import Tour from './Tour'
 import { ADMIN_TOUR, MERCHANT_TOUR, TOUR_EVENT, TOUR_VERSION, openTour } from '../lib/tour'
-import type { AdminStatus } from '../lib/types'
-
-// "Reset demo" wipes ALL data — it belongs only on the demo box / local dev, never on
-// a client production deployment.
-const IS_DEMO_HOST = typeof window !== 'undefined' &&
-  ['app.paymentrecon.site', 'localhost', '127.0.0.1'].includes(window.location.hostname)
 
 type NavItem = { to: string; label: string; icon: string; end?: boolean; tour?: string }
 
@@ -44,8 +38,6 @@ export default function Layout() {
   const [navOpen, setNavOpen] = useState(false)
   useEffect(() => { setNavOpen(false) }, [location.pathname])
 
-  const [showReset, setShowReset] = useState(false)
-  const [resetting, setResetting] = useState(false)
   const [showPwd, setShowPwd] = useState(false)
   const [curPwd, setCurPwd] = useState('')
   const [newPwd, setNewPwd] = useState('')
@@ -134,20 +126,6 @@ export default function Layout() {
     }
   }
 
-  const doReset = async () => {
-    setResetting(true)
-    try {
-      await api<{ ok: boolean; status: AdminStatus }>('/api/admin/reset', { method: 'POST' })
-      toastSuccess('Cleared — ready for a fresh upload')
-      setShowReset(false)
-      navigate('/upload')
-    } catch {
-      toastError('Reset failed')
-    } finally {
-      setResetting(false)
-    }
-  }
-
   return (
     <div className={`shell${navOpen ? ' nav-open' : ''}`}>
       {showTour && <Tour key={tourStart} steps={tourSteps} startIndex={tourStart} onClose={closeTour} context={{ merchant: tourMerchant }} />}
@@ -199,11 +177,6 @@ export default function Layout() {
             <span>CoreServices</span>
           </div>
           <div className="tb-actions" style={{ marginLeft: 'auto' }}>
-            {isAdmin && IS_DEMO_HOST && (
-              <button className="btn sm" onClick={() => setShowReset(true)}>
-                ⟳ Reset demo
-              </button>
-            )}
             {!isAdmin && (
               <>
                 <button className="btn sm" onClick={() => openTour()}>
@@ -226,26 +199,6 @@ export default function Layout() {
         </footer>
       </div>
 
-      {showReset && (
-        <Modal
-          title="Reset demo data"
-          onClose={() => (resetting ? null : setShowReset(false))}
-          footer={
-            <>
-              <button className="btn" onClick={() => setShowReset(false)} disabled={resetting}>Cancel</button>
-              <button className="btn primary" onClick={() => void doReset()} disabled={resetting} style={{ background: 'var(--red)', borderColor: 'var(--red)' }}>
-                {resetting ? 'Clearing…' : 'Clear all data'}
-              </button>
-            </>
-          }
-        >
-          <div>
-            Clear <b>ALL</b> imported data? This wipes every transaction, ledger entry and settlement so you can
-            upload fresh in front of the client.
-          </div>
-          <div className="dim small">This cannot be undone.</div>
-        </Modal>
-      )}
 
       {showPwd && (
         <Modal
