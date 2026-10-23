@@ -315,57 +315,61 @@ export default function LedgerMerchant() {
       )}
 
       <div className="card ledger-statement-card">
-        <div className="card-title" style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
-          <span>Merchant ledger</span>
-          <div className="seg" data-print="hide">
-            <button className={view === 'daily' ? 'on' : ''} onClick={() => setView('daily')}>
-              Day-wise
-              <span className="c">{statement.data ? fmtInt(statement.data.total) : '·'}</span>
-            </button>
-            <button className={view === 'whole' ? 'on' : ''} onClick={() => setView('whole')}>
-              Whole
-              <span className="c">{fullStatement.data ? fmtInt(wholeRows.length) : '·'}</span>
-            </button>
+        <div className="ledger-toolbar">
+          <div className="lt-head">
+            <div className="lt-head-left">
+              <span className="lt-title">Merchant ledger</span>
+              <div className="seg" data-print="hide">
+                <button className={view === 'daily' ? 'on' : ''} onClick={() => setView('daily')}>
+                  Day-wise
+                  <span className="c">{statement.data ? fmtInt(statement.data.total) : '·'}</span>
+                </button>
+                <button className={view === 'whole' ? 'on' : ''} onClick={() => setView('whole')}>
+                  Whole
+                  <span className="c">{fullStatement.data ? fmtInt(wholeRows.length) : '·'}</span>
+                </button>
+              </div>
+            </div>
+            <div className="lt-export" data-print="hide">
+              <span className="export-label">Export</span>
+              <button className="export-btn" onClick={() => void exportCSV()} disabled={!rows.length}>CSV</button>
+              <button className="export-btn" onClick={() => void exportExcel()} disabled={!rows.length}>Excel</button>
+              <button className="export-btn" onClick={printToPDF} disabled={!rows.length}>PDF</button>
+            </div>
           </div>
-          <input
-            className="input sm"
-            style={{ maxWidth: 220 }}
-            placeholder="Search date, currency, confirmation…"
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            data-print="hide"
-          />
-          <div className="seg" data-print="hide">
-            <button className={payStatus === '' ? 'on' : ''} onClick={() => setParam('status', '')}>All</button>
-            <button className={payStatus === 'paid' ? 'on' : ''} onClick={() => setParam('status', 'paid')}>Paid</button>
-            <button className={payStatus === 'unpaid' ? 'on' : ''} onClick={() => setParam('status', 'unpaid')}>Unpaid</button>
-          </div>
-          {currencyOptions.length > 1 && (
-            <select
-              className="select"
-              style={{ maxWidth: 150 }}
-              value={currency}
-              onChange={(e) => setParam('currency', e.target.value)}
-              data-print="hide"
-            >
-              <option value="">All currencies</option>
-              {currencyOptions.map((c) => (
-                <option key={c} value={c}>{c}</option>
-              ))}
-            </select>
-          )}
-          <div className="ledger-actions" data-print="hide">
-            <span className="dim small">From</span>
-            <input className="input sm" type="date" value={dateFrom} onChange={(e) => setParam('date_from', e.target.value)} />
-            <span className="dim small">to</span>
-            <input className="input sm" type="date" value={dateTo} onChange={(e) => setParam('date_to', e.target.value)} />
+          <div className="lt-controls" data-print="hide">
+            <input
+              className="input sm lt-search"
+              placeholder="Search date, currency, confirmation…"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+            />
+            <div className="seg">
+              <button className={payStatus === '' ? 'on' : ''} onClick={() => setParam('status', '')}>All</button>
+              <button className={payStatus === 'paid' ? 'on' : ''} onClick={() => setParam('status', 'paid')}>Paid</button>
+              <button className={payStatus === 'unpaid' ? 'on' : ''} onClick={() => setParam('status', 'unpaid')}>Unpaid</button>
+            </div>
+            {currencyOptions.length > 1 && (
+              <select
+                className="select sm lt-ccy"
+                value={currency}
+                onChange={(e) => setParam('currency', e.target.value)}
+              >
+                <option value="">All currencies</option>
+                {currencyOptions.map((c) => (
+                  <option key={c} value={c}>{c}</option>
+                ))}
+              </select>
+            )}
+            <div className="lt-dates">
+              <span className="dim small">From</span>
+              <input className="input sm" type="date" value={dateFrom} onChange={(e) => setParam('date_from', e.target.value)} />
+              <span className="dim small">to</span>
+              <input className="input sm" type="date" value={dateTo} onChange={(e) => setParam('date_to', e.target.value)} />
+            </div>
             {(dateFrom || dateTo || query || payStatus || currency) && (
               <button className="btn sm" onClick={() => { setParam('date_from', ''); setParam('date_to', ''); setParam('status', ''); setParam('currency', ''); setSearch('') }}>Clear</button>
             )}
-            <span className="export-label">Export</span>
-            <button className="export-btn" onClick={() => void exportCSV()} disabled={!rows.length}>CSV</button>
-            <button className="export-btn" onClick={() => void exportExcel()} disabled={!rows.length}>Excel</button>
-            <button className="export-btn" onClick={printToPDF} disabled={!rows.length}>PDF</button>
           </div>
         </div>
         <div className="dim small ledger-note">

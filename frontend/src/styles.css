@@ -624,6 +624,23 @@ table.data tbody tr.click:hover { background: var(--hover); }
   align-items: center;
   flex-wrap: wrap;
 }
+
+/* Merchant-ledger toolbar: title + view toggle / export on top, filters below */
+.ledger-toolbar {
+  display: flex; flex-direction: column; gap: 12px;
+  padding: 14px 20px; border-bottom: 1px solid var(--border);
+}
+.ledger-toolbar .lt-head {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: 12px; flex-wrap: wrap;
+}
+.ledger-toolbar .lt-head-left { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.ledger-toolbar .lt-title { font-size: 14px; font-weight: 600; color: var(--ink); }
+.ledger-toolbar .lt-export { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.ledger-toolbar .lt-controls { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.ledger-toolbar .lt-search { flex: 1 1 200px; min-width: 160px; max-width: 280px; }
+.ledger-toolbar .lt-ccy { max-width: 160px; }
+.ledger-toolbar .lt-dates { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .export-label {
   font-size: 12px;
   color: var(--ink-3);
