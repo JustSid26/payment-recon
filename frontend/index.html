@@ -6,9 +6,17 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
     <title>CoreServices — Settlement &amp; Ledger</title>
 
+    <!-- Apply the saved theme before first paint so there's no flash. -->
+    <script>
+      try {
+        var t = localStorage.getItem('cs-theme')
+        if (t === 'light' || t === 'dark') document.documentElement.setAttribute('data-theme', t)
+      } catch (e) {}
+    </script>
+
     <!-- PWA -->
     <link rel="manifest" href="/manifest.webmanifest" />
-    <meta name="theme-color" content="#1d4ed8" />
+    <meta name="theme-color" content="#f6f8fb" />
     <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="mobile-web-app-capable" content="yes" />

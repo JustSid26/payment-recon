@@ -490,41 +490,49 @@ export default function SettlementDetailPage({ uuid: uuidProp, embedded }: { uui
 
   return (
     <div className="stack">
-      <div data-print="hide">
-        {!embedded && <Link to="/settlements" className="back-link">← Settlements</Link>}
-        <div className="page-head" style={{ marginBottom: 0 }}>
-          <div>
-            <h1 style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-              Settlement statement <StatusChip status={s.state} />
-            </h1>
-            <div className="sub">
-              {s.merchant_name} · <span className="ccy-tag">{ccy}</span> · {fmtInt(s.items_count)} items
-              {s.confirmation_code && (
-                <> · Code <b className="mono">{s.confirmation_code}</b></>
-              )}
-            </div>
+      <div className="settle-header card" data-print="hide">
+        <div className="sh-main">
+          {!embedded && <Link to="/settlements" className="back-link">← Settlements</Link>}
+          <div className="sh-title">
+            <span className="ccy-tag">{ccy}</span>
+            <h1>{s.merchant_name}</h1>
+            <StatusChip status={s.state} />
           </div>
+          <div className="sh-meta num">
+            {fmtDate(s.window_start)} → {fmtDate(s.window_end)} · {fmtInt(s.items_count)} items
+            {s.confirmation_code && <> · <b className="mono">{s.confirmation_code}</b></>}
+          </div>
+          <div className="sh-counts">
+            <span><b>{fmtInt(counts.paid)}</b> paid</span>
+            <span><b>{fmtInt(counts.declined)}</b> declined</span>
+            <span><b>{fmtInt(counts.refunds)}</b> refunds</span>
+            <span><b>{fmtInt(counts.chargebacks)}</b> chargebacks</span>
+          </div>
+        </div>
+        <div className="sh-side">
+          <div className="sh-net-label">Net payout</div>
+          <div className={`sh-net num${b.net_payout_minor < 0 ? ' neg' : ''}`}>{fmtMoney(b.net_payout_minor, ccy)}</div>
           {isAdmin && (
-            <div className="head-actions">
-              <span className="scope-tag" title="These buttons act on the WHOLE settlement">Whole settlement</span>
-              <button className="btn" onClick={() => setShowSendReport(true)} disabled={emailing}
-                      title="Email the whole-settlement report (PDF + Excel) to the merchant">
-                {emailing ? 'Sending…' : '✉ Send full report'}
-              </button>
-              {s.state === 'generated' && (
-                <>
-                  <button className="btn" onClick={() => setShowCancel(true)} disabled={completing || cancelling}>
-                    Cancel settlement
-                  </button>
-                  <button className="btn primary" onClick={() => setShowConfirm(true)} disabled={completing || cancelling}>
-                    {completing ? 'Posting payout…' : '✓ Confirm whole payout'}
-                  </button>
-                </>
-              )}
-              {s.state === 'completed' && (
-                <button className="btn success" disabled>✓ Completed</button>
-              )}
-            </div>
+            <>
+              <div className="sh-actions">
+                <button className="btn sm" onClick={() => setShowSendReport(true)} disabled={emailing}
+                        title="Email the whole-settlement report (PDF + Excel) to the merchant">
+                  {emailing ? 'Sending…' : '✉ Send report'}
+                </button>
+                {s.state === 'generated' && (
+                  <>
+                    <button className="btn sm" onClick={() => setShowCancel(true)} disabled={completing || cancelling}>
+                      Cancel
+                    </button>
+                    <button className="btn primary sm" onClick={() => setShowConfirm(true)} disabled={completing || cancelling}>
+                      {completing ? 'Posting…' : '✓ Confirm payout'}
+                    </button>
+                  </>
+                )}
+                {s.state === 'completed' && <span className="pay-pill paid">✓ Paid</span>}
+              </div>
+              {s.state === 'generated' && <div className="sh-hint dim small">Acts on the whole settlement</div>}
+            </>
           )}
         </div>
       </div>

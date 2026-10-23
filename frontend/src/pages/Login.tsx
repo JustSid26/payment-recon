@@ -11,6 +11,31 @@ const DEMO: Record<Role, { email: string; password: string; sub: string }> = {
   merchant: { email: 'merchant@canamoney.com', password: 'demo123', sub: 'CANAMONEY EXCHANGE LTD.' },
 }
 
+// The brand panel speaks to whoever is signing in: operators reconcile the whole
+// book; merchants read their own payouts.
+const BRAND: Record<Role, { line1: string; hl: string; sub: string; features: { t: string; s: string }[] }> = {
+  admin: {
+    line1: 'Every payout,',
+    hl: 'reconciled.',
+    sub: 'Import processor files, auto-reconcile into a double-entry ledger, and pay merchants per currency — reserves, fees and chargebacks tracked to the cent.',
+    features: [
+      { t: 'Double-entry ledger', s: 'Every cent posted append-only and fully auditable.' },
+      { t: 'Per-currency settlements', s: 'T+N timing, day-wise payouts and running balances.' },
+      { t: 'Reserves & chargebacks', s: 'Rolling reserve, refunds and CB fees handled automatically.' },
+    ],
+  },
+  merchant: {
+    line1: 'Your money,',
+    hl: 'clearly settled.',
+    sub: 'Track every settlement, read your per-currency statements, and see exactly what’s paid, pending and held — down to the cent.',
+    features: [
+      { t: 'Day-wise statements', s: 'Every processing day broken down and exportable.' },
+      { t: 'Per-currency payouts', s: 'Balances, fees and net payout for each currency.' },
+      { t: 'Clear reserves & refunds', s: 'See what’s held, released, refunded and charged back.' },
+    ],
+  },
+}
+
 // The demo-credentials shortcut only belongs on the demo box / local dev — never on
 // a client production deployment.
 const DEMO_HOSTS = ['app.paymentrecon.site', 'localhost', '127.0.0.1']
@@ -134,144 +159,156 @@ export default function Login() {
   const settingPw = isMerchant && mode === 'set-password'
 
   return (
-    <div className="login-wrap">
-      <div className="card login-card">
-        <div className="brand-row">
-          <div className="mark" style={{
-            width: 38, height: 38, borderRadius: 10,
-            background: 'linear-gradient(135deg, #2563eb, #7c3aed)',
-            display: 'flex', alignItems: 'center', justifyContent: 'center',
-            color: '#fff', fontWeight: 700, fontSize: 16,
-          }}>
-            CS
-          </div>
-          <div>
-            <h1>CoreServices</h1>
-            <div className="dim small">Merchant settlement &amp; ledger platform</div>
-          </div>
+    <div className="login-split">
+      <aside className="login-brand">
+        <div className="lb-brand">
+          <div className="lb-mark">CS</div>
+          <span>CoreServices</span>
         </div>
-
-        <div className="role-toggle" role="tablist">
-          <button
-            type="button"
-            role="tab"
-            aria-selected={isMerchant}
-            className={isMerchant ? 'on' : ''}
-            onClick={() => switchRole('merchant')}
-          >
-            Merchant
-          </button>
-          <button
-            type="button"
-            role="tab"
-            aria-selected={!isMerchant}
-            className={!isMerchant ? 'on' : ''}
-            onClick={() => switchRole('admin')}
-          >
-            Admin
-          </button>
+        <div className="lb-body" key={role}>
+          <h1 className="lb-head">{BRAND[role].line1}<br /><span className="hl">{BRAND[role].hl}</span></h1>
+          <p className="lb-sub">{BRAND[role].sub}</p>
+          <ul className="lb-features">
+            {BRAND[role].features.map((f) => (
+              <li key={f.t}>
+                <span className="lb-check material-symbols-outlined">check</span>
+                <div><b>{f.t}</b><span>{f.s}</span></div>
+              </li>
+            ))}
+          </ul>
         </div>
+        <div className="lb-foot">Internal settlement &amp; ledger platform</div>
+      </aside>
 
-        <div className="login-heading">
-          <h2>{isMerchant ? 'Merchant sign in' : 'Admin sign in'}</h2>
-          <div className="dim small">
-            {isMerchant ? 'Sign in with your merchant ID or email.' : 'CoreServices operations console.'}
-          </div>
-        </div>
-
-        <form className="form" onSubmit={onSubmit}>
-          {error && <div className="form-error">{error}</div>}
-          {notice && !error && <div className="form-notice">{notice}</div>}
-
-          <div className="field">
-            <label htmlFor="identifier">{isMerchant ? 'Merchant ID or email' : 'Email'}</label>
-            <input
-              id="identifier"
-              className="input"
-              type={isMerchant ? 'text' : 'email'}
-              autoComplete="username"
-              value={identifier}
-              onChange={(e) => setIdentifier(e.target.value)}
-              placeholder={isMerchant ? '100123 or you@company.com' : 'you@company.com'}
-              disabled={settingPw}
-              required
-            />
-          </div>
-
-          {settingPw ? (
-            <>
-              <div className="field">
-                <label htmlFor="new-password">New password</label>
-                <PasswordInput id="new-password" value={password} onChange={setPassword}
-                  autoComplete="new-password" placeholder="At least 8 characters" />
-              </div>
-              <div className="field">
-                <label htmlFor="confirm-password">Confirm password</label>
-                <PasswordInput id="confirm-password" value={confirm} onChange={setConfirm}
-                  autoComplete="new-password" placeholder="Re-enter password" onEnter={() => void doSetPassword()} />
-              </div>
-            </>
-          ) : (
-            <div className="field">
-              <label htmlFor="password">Password</label>
-              <PasswordInput id="password" value={password} onChange={setPassword}
-                autoComplete="current-password" placeholder="••••••••" />
+      <main className="login-form-panel">
+        <div className="login-form-inner">
+          <div className="brand-row lf-brand">
+            <div className="lf-mark">CS</div>
+            <div>
+              <h1>CoreServices</h1>
+              <div className="dim small">Settlement &amp; ledger platform</div>
             </div>
-          )}
+          </div>
 
-          <button className="btn primary" type="submit" disabled={busy} style={{ justifyContent: 'center' }}>
-            {busy
-              ? (settingPw ? 'Setting password…' : 'Signing in…')
-              : (settingPw ? 'Set password & sign in' : 'Sign in')}
-          </button>
+          <div className="role-toggle" role="tablist" data-role={role}>
+            <span className="role-thumb" aria-hidden="true" />
+            <button
+              type="button" role="tab" aria-selected={isMerchant}
+              className={isMerchant ? 'on' : ''} onClick={() => switchRole('merchant')}
+            >
+              Merchant
+            </button>
+            <button
+              type="button" role="tab" aria-selected={!isMerchant}
+              className={!isMerchant ? 'on' : ''} onClick={() => switchRole('admin')}
+            >
+              Admin
+            </button>
+          </div>
 
-          {isMerchant && (
-            settingPw ? (
-              <button type="button" className="link-btn" disabled={busy} onClick={reset}>
-                ← Back to sign in
-              </button>
+          <div className="login-animin" key={role}>
+          <div className="login-heading">
+            <h2>{isMerchant ? 'Merchant sign in' : 'Admin sign in'}</h2>
+            <div className="dim small">
+              {isMerchant ? 'Sign in with your merchant ID or email.' : 'CoreServices operations console.'}
+            </div>
+          </div>
+
+          <form className="form" onSubmit={onSubmit}>
+            {error && <div className="form-error">{error}</div>}
+            {notice && !error && <div className="form-notice">{notice}</div>}
+
+            <div className="field">
+              <label htmlFor="identifier">{isMerchant ? 'Merchant ID or email' : 'Email'}</label>
+              <input
+                id="identifier"
+                className="input"
+                type={isMerchant ? 'text' : 'email'}
+                autoComplete="username"
+                value={identifier}
+                onChange={(e) => setIdentifier(e.target.value)}
+                placeholder={isMerchant ? '100123 or you@company.com' : 'you@company.com'}
+                disabled={settingPw}
+                required
+              />
+            </div>
+
+            {settingPw ? (
+              <>
+                <div className="field">
+                  <label htmlFor="new-password">New password</label>
+                  <PasswordInput id="new-password" value={password} onChange={setPassword}
+                    autoComplete="new-password" placeholder="At least 8 characters" />
+                </div>
+                <div className="field">
+                  <label htmlFor="confirm-password">Confirm password</label>
+                  <PasswordInput id="confirm-password" value={confirm} onChange={setConfirm}
+                    autoComplete="new-password" placeholder="Re-enter password" onEnter={() => void doSetPassword()} />
+                </div>
+              </>
             ) : (
-              <button
-                type="button"
-                className="link-btn"
-                disabled={busy}
-                onClick={() => {
-                  setError(null)
-                  if (!identifier.trim()) {
-                    setNotice('Enter your merchant ID or email above, then set a password.')
-                    return
-                  }
-                  setMode('set-password')
-                  setPassword('')
-                  setConfirm('')
-                  setNotice('Choose a password for this merchant account.')
-                }}
-              >
-                First time? Set your password
-              </button>
-            )
-          )}
-        </form>
+              <div className="field">
+                <label htmlFor="password">Password</label>
+                <PasswordInput id="password" value={password} onChange={setPassword}
+                  autoComplete="current-password" placeholder="••••••••" />
+              </div>
+            )}
 
-        {SHOW_DEMO && (
-          <button
-            type="button"
-            className="demo-chip"
-            disabled={busy}
-            onClick={() => {
-              reset()
-              const d = DEMO[role]
-              setIdentifier(d.email)
-              setPassword(d.password)
-              void doLogin(d.email, d.password)
-            }}
-          >
-            <div className="t">Use {isMerchant ? 'merchant' : 'admin'} demo</div>
-            <div className="s">{DEMO[role].email}</div>
-            <div className="s">{DEMO[role].sub}</div>
-          </button>
-        )}
-      </div>
+            <button className="btn primary" type="submit" disabled={busy} style={{ justifyContent: 'center' }}>
+              {busy
+                ? (settingPw ? 'Setting password…' : 'Signing in…')
+                : (settingPw ? 'Set password & sign in' : 'Sign in')}
+            </button>
+
+            {isMerchant && (
+              settingPw ? (
+                <button type="button" className="link-btn" disabled={busy} onClick={reset}>
+                  ← Back to sign in
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  className="link-btn"
+                  disabled={busy}
+                  onClick={() => {
+                    setError(null)
+                    if (!identifier.trim()) {
+                      setNotice('Enter your merchant ID or email above, then set a password.')
+                      return
+                    }
+                    setMode('set-password')
+                    setPassword('')
+                    setConfirm('')
+                    setNotice('Choose a password for this merchant account.')
+                  }}
+                >
+                  First time? Set your password
+                </button>
+              )
+            )}
+          </form>
+
+          {SHOW_DEMO && (
+            <button
+              type="button"
+              className="demo-chip"
+              disabled={busy}
+              onClick={() => {
+                reset()
+                const d = DEMO[role]
+                setIdentifier(d.email)
+                setPassword(d.password)
+                void doLogin(d.email, d.password)
+              }}
+            >
+              <div className="t">Use {isMerchant ? 'merchant' : 'admin'} demo</div>
+              <div className="s">{DEMO[role].email}</div>
+              <div className="s">{DEMO[role].sub}</div>
+            </button>
+          )}
+          </div>
+        </div>
+      </main>
     </div>
   )
 }

@@ -1,4 +1,4 @@
-import { Fragment, useMemo, useRef, useState } from 'react'
+import { Fragment, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { api } from '../lib/api'
 import { useApi } from '../lib/useApi'
@@ -8,8 +8,6 @@ import { DataTable, EmptyState, StatusChip, toastSuccess, type Column } from '..
 import { FeeScheduleModal, type FeeRates } from '../components/FeeScheduleModal'
 import { ApplyPresetModal } from '../components/ApplyPresetModal'
 
-type ApplyResult = { applied: number; failed: number; auto_settlements?: { generated: number; appended?: number } }
-
 type Filter = 'all' | 'active' | 'unconfigured'
 
 export default function Merchants() {
@@ -18,11 +16,10 @@ export default function Merchants() {
 
   const [q, setQ] = useState('')
   const [filter, setFilter] = useState<Filter>('all')
-  const [selected, setSelected] = useState<Set<string>>(new Set())
   const [showFees, setShowFees] = useState(false)
   const [showCreate, setShowCreate] = useState(false)
 
-  const items = data?.items ?? []
+  const items = useMemo(() => data?.items ?? [], [data])
   const counts = useMemo(() => ({
     all: items.length,
     active: items.filter((m) => m.status === 'active').length,
@@ -39,56 +36,12 @@ export default function Merchants() {
     })
   }, [items, q, filter])
 
-  const toggle = (uuid: string) =>
-    setSelected((s) => {
-      const n = new Set(s)
-      n.has(uuid) ? n.delete(uuid) : n.add(uuid)
-      return n
-    })
-
-  const allInView = rows.length > 0 && rows.every((m) => selected.has(m.merchant_uuid))
-  const someInView = rows.some((m) => selected.has(m.merchant_uuid))
-  const toggleAll = () =>
-    setSelected((s) => {
-      const n = new Set(s)
-      if (allInView) rows.forEach((m) => n.delete(m.merchant_uuid))
-      else rows.forEach((m) => n.add(m.merchant_uuid))
-      return n
-    })
-
-  const settledNote = (r: ApplyResult) => {
-    const g = (r.auto_settlements?.generated ?? 0) + (r.auto_settlements?.appended ?? 0)
-    return g > 0 ? ` · ${g} settlement${g === 1 ? '' : 's'} updated` : ''
-  }
-
-  const createPreset = async (rates: FeeRates, name: string, alsoApply: boolean) => {
+  const createPreset = async (rates: FeeRates, name: string) => {
     await api('/api/fee-presets', { method: 'POST', body: { name, ...rates } })
-    if (alsoApply && selected.size > 0) {
-      const res = await api<ApplyResult>('/api/merchants/fee-schedule/bulk', {
-        method: 'POST',
-        body: { ...rates, merchant_uuids: [...selected] },
-      })
-      toastSuccess(`Preset "${name}" created · applied to ${res.applied} merchant${res.applied === 1 ? '' : 's'}${settledNote(res)}`)
-      setSelected(new Set())
-      reload()
-    } else {
-      toastSuccess(`Preset "${name}" created`)
-    }
+    toastSuccess(`Preset "${name}" created`)
   }
 
   const cols: Column<Merchant>[] = [
-    {
-      key: 'sel',
-      header: <SelectAll checked={allInView} indeterminate={someInView && !allInView} onChange={toggleAll} />,
-      render: (m) => (
-        <input
-          type="checkbox"
-          checked={selected.has(m.merchant_uuid)}
-          onClick={(e) => e.stopPropagation()}
-          onChange={() => toggle(m.merchant_uuid)}
-        />
-      ),
-    },
     { key: 'idx', header: '#', render: (_m, i) => <span className="num dim">{i + 1}</span> },
     {
       key: 'name',
@@ -131,19 +84,9 @@ export default function Merchants() {
         </div>
         <div style={{ marginLeft: 'auto', display: 'flex', gap: 8 }}>
           <button className="btn" onClick={() => setShowCreate(true)}>Create preset</button>
-          <button className="btn primary" onClick={() => setShowFees(true)}>
-            Set fee schedule{selected.size > 0 ? ` (${selected.size})` : ''}
-          </button>
+          <button className="btn primary" onClick={() => setShowFees(true)}>Set fee schedule</button>
         </div>
       </div>
-
-      {selected.size > 0 && (
-        <div className="bulk-bar">
-          <span><b>{selected.size}</b> selected</span>
-          <button className="btn sm primary" onClick={() => setShowFees(true)}>Set fee schedule →</button>
-          <button className="btn sm" onClick={() => setSelected(new Set())}>Clear</button>
-        </div>
-      )}
 
       <div className="card">
         <DataTable
@@ -159,9 +102,8 @@ export default function Merchants() {
       {showFees && (
         <ApplyPresetModal
           merchants={items}
-          initialSelected={selected}
           onClose={() => setShowFees(false)}
-          onApplied={() => { setSelected(new Set()); reload() }}
+          onApplied={() => reload()}
           onCreatePreset={() => { setShowFees(false); setShowCreate(true) }}
         />
       )}
@@ -172,19 +114,12 @@ export default function Merchants() {
           subtitle="Save a reusable named fee config. It won't change any merchant until you apply it."
           saveLabel="Create preset"
           showName
-          applyCount={selected.size}
           onClose={() => setShowCreate(false)}
           onSubmit={createPreset}
         />
       )}
     </div>
   )
-}
-
-function SelectAll({ checked, indeterminate, onChange }: { checked: boolean; indeterminate: boolean; onChange: () => void }) {
-  const ref = useRef<HTMLInputElement>(null)
-  if (ref.current) ref.current.indeterminate = indeterminate
-  return <input ref={ref} type="checkbox" checked={checked} onChange={onChange} onClick={(e) => e.stopPropagation()} />
 }
 
 function CcyStack({ rows }: { rows: { currency: string; minor: number }[] }) {

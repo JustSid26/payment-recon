@@ -2,8 +2,8 @@ import { Fragment, useMemo, useState } from 'react'
 import { api, getUser } from '../lib/api'
 import { useApi } from '../lib/useApi'
 import type { Merchant, Settlement } from '../lib/types'
-import { fmtDate, fmtInt, fmtMoney } from '../lib/money'
-import { DataTable, EmptyState, MoneyCell, StatusChip, type Column } from '../components/ui'
+import { fmtInt, fmtMoney } from '../lib/money'
+import { DataTable, EmptyState, StatusChip, type Column } from '../components/ui'
 import DailySettlementRecords from '../components/DailySettlementRecords'
 import SettlementDetailPage from './SettlementDetail'
 
@@ -134,7 +134,6 @@ export default function Settlements() {
           <div className="stack">
             <div className="drill-head">
               <button className="btn sm" onClick={() => setOpenMerchant(null)}>← All merchants</button>
-              <h2 className="drill-title">{openGroup.merchant_name}</h2>
             </div>
             <SettlementCurrencyView key={openGroup.merchant_uuid} settlements={openGroup.settlements} />
           </div>
@@ -199,23 +198,22 @@ function SettlementCurrencyView({
 
   return (
     <div className="stack">
-      <div className="ccy-card-row" data-tour={merchantView ? 'm-settle-filters' : undefined}>
-        {byCcy.map((s) => (
-          <button
-            key={s.settlement_uuid}
-            type="button"
-            className={`ccy-settle-card${selected?.currency === s.currency ? ' on' : ''}`}
-            onClick={() => setCcy(s.currency)}
-          >
-            <div className="ccy-settle-top">
+      {byCcy.length > 1 && (
+        <div className="ccy-switch" data-tour={merchantView ? 'm-settle-filters' : undefined}>
+          {byCcy.map((s) => (
+            <button
+              key={s.settlement_uuid}
+              type="button"
+              className={`ccy-switch-btn${selected?.currency === s.currency ? ' on' : ''}`}
+              onClick={() => setCcy(s.currency)}
+            >
               <span className="ccy-tag">{s.currency}</span>
+              <span className="num">{fmtMoney(s.net_payout_minor, s.currency)}</span>
               <StatusChip status={s.state} />
-            </div>
-            <div className="ccy-settle-net"><MoneyCell minor={s.net_payout_minor} currency={s.currency} /></div>
-            <div className="dim small nowrap">{fmtDate(s.window_start)} → {fmtDate(s.window_end)}</div>
-          </button>
-        ))}
-      </div>
+            </button>
+          ))}
+        </div>
+      )}
 
       {selected && (
         <div data-tour={merchantView ? 'm-settle-report' : undefined}>

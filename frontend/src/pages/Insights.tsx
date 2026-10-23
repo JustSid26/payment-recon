@@ -4,6 +4,8 @@ import { useApi } from '../lib/useApi'
 import { fmtInt, fmtMoney } from '../lib/money'
 import { downloadExcelWorkbook, toMajor, type Cell } from '../lib/export'
 import { EmptyState, LoadingBlock } from '../components/ui'
+import { CountUp } from '../components/CountUp'
+import { useGrow } from '../lib/useGrow'
 import type {
   CountryInsight, CountryInsights, MLCountry, MLInsights,
   IssuersResponse, MerchantsResponse,
@@ -102,20 +104,12 @@ function rateSignal(rate: number | null): { signal: Signal; label: string } {
   return { signal: 'neutral', label: 'Mixed' }
 }
 
-function AcceptBar({ rate, signal }: { rate: number | null; signal: Signal }) {
-  return (
-    <div className="accept" title={pct(rate)}>
-      <div className="accept-bar"><div className={`accept-fill ${signal}`} style={{ width: `${(rate ?? 0) * 100}%` }} /></div>
-      <span className="accept-pct">{pct(rate)}</span>
-    </div>
-  )
-}
-
 type Seg = { label: string; value: number; color: string }
 
-/** Dependency-free SVG donut. */
+/** Dependency-free SVG donut that sweeps in (and counts its center up) on mount. */
 function Donut({ segments, size = 132 }: { segments: Seg[]; size?: number }) {
   const total = segments.reduce((s, x) => s + x.value, 0)
+  const p = useGrow(900, [total]) // 0→1 draw progress
   const stroke = 20
   const r = (size - stroke) / 2
   const C = 2 * Math.PI * r
@@ -123,25 +117,27 @@ function Donut({ segments, size = 132 }: { segments: Seg[]; size?: number }) {
   return (
     <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`} className="donut" role="img">
       <g transform={`rotate(-90 ${size / 2} ${size / 2})`}>
-        {total === 0 ? (
-          <circle cx={size / 2} cy={size / 2} r={r} fill="none" stroke="var(--gray-bg)" strokeWidth={stroke} />
-        ) : (
-          segments.filter((s) => s.value > 0).map((s) => {
-            const frac = s.value / total
-            const dash = frac * C
-            const seg = (
-              <circle
-                key={s.label} cx={size / 2} cy={size / 2} r={r} fill="none"
-                stroke={s.color} strokeWidth={stroke}
-                strokeDasharray={`${dash} ${C - dash}`} strokeDashoffset={-acc * C}
-              />
-            )
-            acc += frac
-            return seg
-          })
-        )}
+        {/* track */}
+        <circle cx={size / 2} cy={size / 2} r={r} fill="none" stroke="var(--gray-bg)" strokeWidth={stroke} />
+        {total > 0 && segments.filter((s) => s.value > 0).map((s) => {
+          const frac = s.value / total
+          // scale both the arc length and its start by the draw progress so the
+          // whole ring sweeps clockwise from nothing to full.
+          const dash = frac * C * p
+          const seg = (
+            <circle
+              key={s.label} cx={size / 2} cy={size / 2} r={r} fill="none"
+              stroke={s.color} strokeWidth={stroke}
+              strokeDasharray={`${dash} ${C - dash}`} strokeDashoffset={-acc * C * p}
+            />
+          )
+          acc += frac
+          return seg
+        })}
       </g>
-      <text x="50%" y="50%" className="donut-center" dominantBaseline="middle" textAnchor="middle">{fmtInt(total)}</text>
+      <text x="50%" y="50%" className="donut-center" dominantBaseline="middle" textAnchor="middle">
+        {fmtInt(Math.round(total * p))}
+      </text>
     </svg>
   )
 }
@@ -188,7 +184,7 @@ export default function Insights() {
 // Admin landing: a portfolio summary, then one ranked metric card per merchant.
 function MerchantLanding({ onPick }: { onPick: (m: PickedMerchant) => void }) {
   const { data, loading } = useApi(() => api<MerchantsResponse>('/api/insights/merchants'), [])
-  const list = data?.merchants ?? []
+  const list = useMemo(() => data?.merchants ?? [], [data])
 
   // Rank by acceptance (who's doing better) — enough-volume merchants first, then
   // the long tail; the top of that list is the portfolio leader.
@@ -199,14 +195,14 @@ function MerchantLanding({ onPick }: { onPick: (m: PickedMerchant) => void }) {
   }, [list])
 
   const totals = useMemo(() => {
-    const acc = list.reduce((s, m) => s + m.accepted, 0)
-    const dec = list.reduce((s, m) => s + m.declined, 0)
+    const acc = list.reduce((s, m) => s + (m.accepted ?? 0), 0)
+    const dec = list.reduce((s, m) => s + (m.declined ?? 0), 0)
     return {
       merchants: list.length,
-      transactions: list.reduce((s, m) => s + m.transactions, 0),
+      transactions: list.reduce((s, m) => s + (m.transactions ?? 0), 0),
       accepted: acc, declined: dec,
       acceptance_rate: acc + dec ? acc / (acc + dec) : null,
-      settlements: list.reduce((s, m) => s + m.settlements, 0),
+      settlements: list.reduce((s, m) => s + (m.settlements ?? 0), 0),
     }
   }, [list])
   const leader = ranked.find((m) => m.acceptance_rate != null && m.transactions >= 20) ?? ranked[0]
@@ -226,10 +222,10 @@ function MerchantLanding({ onPick }: { onPick: (m: PickedMerchant) => void }) {
       {list.length > 0 && (
         <>
           <div className="insights-portfolio">
-            <div className="ip-stat"><span className="eyebrow2">Merchants</span><b className="num">{fmtInt(totals.merchants)}</b></div>
-            <div className="ip-stat"><span className="eyebrow2">Transactions</span><b className="num">{fmtInt(totals.transactions)}</b></div>
-            <div className="ip-stat"><span className="eyebrow2">Overall acceptance</span><b className="num">{pct(totals.acceptance_rate)}</b></div>
-            <div className="ip-stat"><span className="eyebrow2">Settlements</span><b className="num">{fmtInt(totals.settlements)}</b></div>
+            <div className="ip-stat"><span className="eyebrow2">Merchants</span><b className="num"><CountUp value={totals.merchants} /></b></div>
+            <div className="ip-stat"><span className="eyebrow2">Transactions</span><b className="num"><CountUp value={totals.transactions} /></b></div>
+            <div className="ip-stat"><span className="eyebrow2">Overall acceptance</span><b className="num">{totals.acceptance_rate == null ? '—' : <CountUp value={totals.acceptance_rate * 100} format={(n) => `${Math.round(n)}%`} />}</b></div>
+            <div className="ip-stat"><span className="eyebrow2">Settlements</span><b className="num"><CountUp value={totals.settlements} /></b></div>
             {leader && list.length > 1 && (
               <div className="ip-leader">
                 <span className="eyebrow2">Top performer</span>
@@ -256,16 +252,25 @@ function MerchantLanding({ onPick }: { onPick: (m: PickedMerchant) => void }) {
                     {isLeader ? <span className="signal-chip good">★ Top</span>
                       : <span className={`signal-chip ${sig.signal}`}>{sig.label}</span>}
                   </div>
-                  <AcceptBar rate={m.acceptance_rate} signal={sig.signal} />
-                  <div className="minsight-stats">
-                    <div><span className="dim small">Transactions</span><b className="num">{fmtInt(m.transactions)}</b></div>
-                    <div><span className="dim small">Accepted</span><b className="num" style={{ color: 'var(--green)' }}>{fmtInt(m.accepted)}</b></div>
-                    <div><span className="dim small">Declined</span><b className="num" style={{ color: 'var(--red)' }}>{fmtInt(m.declined)}</b></div>
+                  <div className="minsight-donut">
+                    <Donut
+                      size={112}
+                      segments={[
+                        { label: 'Accepted', value: m.accepted ?? 0, color: '#12b76a' },
+                        { label: 'Declined', value: m.declined ?? 0, color: '#f04438' },
+                        ...((m.transactions ?? 0) - (m.accepted ?? 0) - (m.declined ?? 0) > 0
+                          ? [{ label: 'Other', value: (m.transactions ?? 0) - (m.accepted ?? 0) - (m.declined ?? 0), color: '#98a2b3' }]
+                          : []),
+                      ]}
+                    />
+                    <div className="minsight-accrow">
+                      <b className="num">{pct(m.acceptance_rate)}</b><span className="dim small">acceptance</span>
+                    </div>
                   </div>
-                  <div className="minsight-settle">
-                    <span className="dim small">Settlements</span>
-                    <b className="num">{fmtInt(m.settlements)}</b>
-                    {m.settlements_paid > 0 && <span className="dim small">· {fmtInt(m.settlements_paid)} paid</span>}
+                  <div className="minsight-stats">
+                    <div><span className="dim small">Accepted</span><b className="num" style={{ color: 'var(--green)' }}><CountUp value={m.accepted ?? 0} /></b></div>
+                    <div><span className="dim small">Declined</span><b className="num" style={{ color: 'var(--red)' }}><CountUp value={m.declined ?? 0} /></b></div>
+                    <div><span className="dim small">Settlements</span><b className="num"><CountUp value={m.settlements ?? 0} /></b></div>
                   </div>
                   {m.captured.length > 0 && (
                     <div className="minsight-cap">

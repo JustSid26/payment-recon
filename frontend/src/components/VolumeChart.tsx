@@ -12,7 +12,8 @@ import type { DailyVolumeRow } from '../lib/types'
 import { currencyExponent, fmtMoney } from '../lib/money'
 import { EmptyState } from './ui'
 
-const SERIES_COLORS = ['#2a78d6', '#1baf7a', '#eda100', '#4a3aa7', '#e34948', '#e87ba4']
+// Stripe-style chart palette — matches the --series-* tokens in the stylesheet.
+const SERIES_COLORS = ['#635bff', '#0073e6', '#00b8a9', '#8b5cf6', '#df1b41', '#ff8f0e']
 
 /**
  * Daily captured volume. Currencies have different units (and JPY a different
@@ -34,6 +35,7 @@ export default function VolumeChart({ rows }: { rows: DailyVolumeRow[] }) {
 
   const [sel, setSel] = useState<string | null>(null)
   const active = sel && currencies.includes(sel) ? sel : currencies[0]
+  const reduced = typeof matchMedia !== 'undefined' && matchMedia('(prefers-reduced-motion: reduce)').matches
 
   const data = useMemo(() => {
     if (!active) return []
@@ -66,7 +68,7 @@ export default function VolumeChart({ rows }: { rows: DailyVolumeRow[] }) {
             onClick={() => setSel(c)}
             style={
               c === active
-                ? { borderColor: colorOf(c), color: colorOf(c), background: '#fff', boxShadow: `inset 0 0 0 1px ${colorOf(c)}` }
+                ? { borderColor: colorOf(c), color: colorOf(c), background: 'var(--surface-solid)', boxShadow: `inset 0 0 0 1px ${colorOf(c)}` }
                 : undefined
             }
           >
@@ -79,12 +81,12 @@ export default function VolumeChart({ rows }: { rows: DailyVolumeRow[] }) {
       <div className="chart-box">
         <ResponsiveContainer width="100%" height="100%">
           <BarChart data={data} margin={{ top: 8, right: 8, left: 0, bottom: 0 }}>
-            <CartesianGrid vertical={false} stroke="#eceef1" />
+            <CartesianGrid vertical={false} stroke="var(--border)" />
             <XAxis
               dataKey="date"
-              tick={{ fontSize: 11, fill: '#9ca3af' }}
+              tick={{ fontSize: 11, fill: 'var(--ink-3)' }}
               tickLine={false}
-              axisLine={{ stroke: '#e5e7eb' }}
+              axisLine={{ stroke: 'var(--border)' }}
               tickFormatter={(d: string) => {
                 const dt = new Date(d + 'T00:00:00Z')
                 return isNaN(dt.getTime())
@@ -93,7 +95,7 @@ export default function VolumeChart({ rows }: { rows: DailyVolumeRow[] }) {
               }}
             />
             <YAxis
-              tick={{ fontSize: 11, fill: '#9ca3af' }}
+              tick={{ fontSize: 11, fill: 'var(--ink-3)' }}
               tickLine={false}
               axisLine={false}
               width={56}
@@ -102,14 +104,20 @@ export default function VolumeChart({ rows }: { rows: DailyVolumeRow[] }) {
               }
             />
             <Tooltip
-              cursor={{ fill: 'rgba(17, 24, 39, 0.04)' }}
-              contentStyle={{ borderRadius: 8, border: '1px solid #e5e7eb', boxShadow: '0 4px 12px rgba(16,24,40,0.08)', fontSize: 12 }}
+              cursor={{ fill: 'var(--hover)' }}
+              contentStyle={{ borderRadius: 10, border: '1px solid var(--border)', background: 'var(--glass-panel)', backdropFilter: 'blur(20px) saturate(180%)', WebkitBackdropFilter: 'blur(20px) saturate(180%)', boxShadow: 'var(--shadow-lg)', color: 'var(--ink)', fontSize: 12 }}
+              labelStyle={{ color: 'var(--ink-2)' }}
+              itemStyle={{ color: 'var(--ink)' }}
               formatter={(_value, _name, item) => {
                 const payload = (item as { payload?: { minor?: number } }).payload
                 return [fmtMoney(payload?.minor ?? 0, active), `Captured (${active})`]
               }}
             />
-            <Bar dataKey="value" fill={colorOf(active)} radius={[4, 4, 0, 0]} maxBarSize={36} isAnimationActive={false} />
+            {/* Bars grow up on mount / when the currency tab changes — DataBench "draw" timing. */}
+            <Bar
+              dataKey="value" fill={colorOf(active)} radius={[4, 4, 0, 0]} maxBarSize={36}
+              isAnimationActive={!reduced} animationDuration={900} animationEasing="ease-out" animationBegin={80}
+            />
           </BarChart>
         </ResponsiveContainer>
       </div>

@@ -4,6 +4,7 @@ import { api, getUser } from '../lib/api'
 import { useApi } from '../lib/useApi'
 import type { Dashboard as DashboardData, LedgerAccount, Settlement, VolumeRow } from '../lib/types'
 import { fmtDate, fmtInt, fmtMoney } from '../lib/money'
+import { CountUp } from '../components/CountUp'
 import VolumeChart from '../components/VolumeChart'
 import { DataTable, EmptyState, MoneyCell, SkeletonCard, StatusChip, type Column } from '../components/ui'
 
@@ -105,7 +106,7 @@ export default function Dashboard() {
         {!isMerchant && data && (
           <div className="card stat-card">
             <div className="label">Merchants</div>
-            <div className="value num">{fmtInt(data.merchant_count)}</div>
+            <div className="value num"><CountUp value={data.merchant_count} /></div>
             <div className="meta"><span>{fmtInt(data.merchant_count - needSetup)} active · {fmtInt(needSetup)} to set up</span></div>
           </div>
         )}
@@ -113,7 +114,7 @@ export default function Dashboard() {
         {data && (
           <div className="card stat-card">
             <div className="label">Transactions</div>
-            <div className="value num">{fmtInt(totals.paid + totals.declined)}</div>
+            <div className="value num"><CountUp value={totals.paid + totals.declined} /></div>
             <div className="meta">
               <span>Paid <b style={{ color: 'var(--green)' }}>{fmtInt(totals.paid)}</b></span>
               <span>Declined <b>{fmtInt(totals.declined)}</b></span>
@@ -124,7 +125,7 @@ export default function Dashboard() {
         {data && (
           <div className="card stat-card">
             <div className="label">Settlements</div>
-            <div className="value num">{fmtInt(data.settlements.generated + data.settlements.completed)}</div>
+            <div className="value num"><CountUp value={data.settlements.generated + data.settlements.completed} /></div>
             <div className="meta">
               <span>Paid out <b>{fmtInt(data.settlements.completed)}</b></span>
               <span>Pending <b>{fmtInt(data.settlements.generated)}</b></span>

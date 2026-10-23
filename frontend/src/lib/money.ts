@@ -9,7 +9,8 @@ export function currencyExponent(currency: string): number {
  */
 export function fmtMoney(minor: number, currency?: string | null): string {
   const exp = currencyExponent(currency ?? '')
-  const value = minor / 10 ** exp
+  // Guard against NaN / undefined / null reaching the UI — show a clean zero.
+  const value = (Number.isFinite(minor) ? minor : 0) / 10 ** exp
   if (!currency) {
     return value.toLocaleString('en-US', { minimumFractionDigits: exp, maximumFractionDigits: exp })
   }
@@ -30,13 +31,14 @@ export function fmtMoney(minor: number, currency?: string | null): string {
 
 /** Format with an explicit sign for statement rows, e.g. "− €12.00". */
 export function fmtMoneySigned(minor: number, currency: string): string {
-  const abs = fmtMoney(Math.abs(minor), currency)
-  return minor < 0 ? `−${abs}` : abs
+  const n = Number.isFinite(minor) ? minor : 0
+  const abs = fmtMoney(Math.abs(n), currency)
+  return n < 0 ? `−${abs}` : abs
 }
 
 /** Compact major-unit number for chart axes (no currency symbol). */
 export function fmtCompact(minor: number, currency: string): string {
-  const value = minor / 10 ** currencyExponent(currency)
+  const value = (Number.isFinite(minor) ? minor : 0) / 10 ** currencyExponent(currency)
   return new Intl.NumberFormat('en-US', { notation: 'compact', maximumFractionDigits: 1 }).format(value)
 }
 
