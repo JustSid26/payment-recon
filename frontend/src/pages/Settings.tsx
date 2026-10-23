@@ -127,7 +127,7 @@ export default function Settings() {
               New here, or need a refresher? Take the guided tour of the whole console, or jump
               straight to the page you want to know about.
             </div>
-            <button className="btn primary" onClick={() => openTour(0)}>🧭 Take the full tour</button>
+            <button className="btn primary" onClick={() => openTour(0)}>Full tour</button>
           </div>
           <div className="tour-pages">
             {TOUR_PAGES.map(({ page, i }) => (
