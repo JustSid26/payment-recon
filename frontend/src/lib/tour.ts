@@ -20,13 +20,13 @@ export const MERCHANT_TOUR: TourStep[] = [
   {
     title: 'Welcome to CoreServices 👋',
     placement: 'center',
-    route: '/',
+    route: '/dashboard',
     body: 'This is your settlement portal — track every payout, see what’s held in reserve, and download statements any time. Let’s walk through each page (about 30 seconds). You can skip whenever you like.',
   },
   {
     target: '.money-hero',
     altTarget: '[data-tour="dashboard"]',
-    route: '/',
+    route: '/dashboard',
     page: 'Dashboard',
     placement: 'bottom',
     title: 'Dashboard — your money at a glance',
@@ -89,7 +89,7 @@ export const ADMIN_TOUR: TourStep[] = [
   {
     title: 'Welcome to CoreServices ops 👋',
     placement: 'center',
-    route: '/',
+    route: '/dashboard',
     body: 'Let’s walk through the operations console — one stop per page, spotlighting the panel that matters. Skip any time, and replay it (or jump to a single page) later from Settings.',
   },
   {
@@ -104,7 +104,7 @@ export const ADMIN_TOUR: TourStep[] = [
   {
     whole: true,
     altTarget: '[data-tour="dashboard"]',
-    route: '/',
+    route: '/dashboard',
     page: 'Dashboard',
     title: 'Dashboard',
     body: 'Your bird’s-eye view — headline KPIs, money by currency, the daily volume chart and your top merchants, all summarised across every merchant.',

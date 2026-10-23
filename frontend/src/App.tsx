@@ -2,6 +2,7 @@ import { Navigate, Route, Routes, useLocation } from 'react-router-dom'
 import { getToken, getUser } from './lib/api'
 import Layout from './components/Layout'
 import { Toaster } from './components/ui'
+import Landing from './pages/Landing'
 import Login from './pages/Login'
 import Dashboard from './pages/Dashboard'
 import Merchants from './pages/Merchants'
@@ -23,17 +24,23 @@ import Insights from './pages/Insights'
 function RequireAuth({ children }: { children: React.ReactElement }) {
   const location = useLocation()
   if (!getToken() || !getUser()) {
-    return <Navigate to="/login" state={{ from: location }} replace />
+    return <Navigate to="/login/merchant" state={{ from: location }} replace />
   }
   return children
 }
 
 function AdminOnly({ children }: { children: React.ReactElement }) {
-  return getUser()?.role === 'admin' ? children : <Navigate to="/" replace />
+  return getUser()?.role === 'admin' ? children : <Navigate to="/dashboard" replace />
 }
 
 function MerchantOnly({ children }: { children: React.ReactElement }) {
-  return getUser()?.role === 'merchant' ? children : <Navigate to="/" replace />
+  return getUser()?.role === 'merchant' ? children : <Navigate to="/dashboard" replace />
+}
+
+// Public home: logged-out visitors see the landing page; anyone already signed
+// in is sent straight to their dashboard.
+function Home() {
+  return getToken() && getUser() ? <Navigate to="/dashboard" replace /> : <Landing />
 }
 
 /** A merchant IS a fixed merchant — skip the "pick a merchant" ledger list and
@@ -50,7 +57,10 @@ export default function App() {
   return (
     <>
       <Routes>
-        <Route path="/login" element={<Login />} />
+        <Route path="/" element={<Home />} />
+        <Route path="/login" element={<Navigate to="/login/merchant" replace />} />
+        <Route path="/login/merchant" element={<Login role="merchant" />} />
+        <Route path="/login/admin" element={<Login role="admin" />} />
         <Route
           element={
             <RequireAuth>
@@ -58,7 +68,7 @@ export default function App() {
             </RequireAuth>
           }
         >
-          <Route path="/" element={<Dashboard />} />
+          <Route path="/dashboard" element={<Dashboard />} />
           <Route
             path="/upload"
             element={
@@ -131,7 +141,7 @@ export default function App() {
               </AdminOnly>
             }
           />
-          <Route path="*" element={<Navigate to="/" replace />} />
+          <Route path="*" element={<Navigate to="/dashboard" replace />} />
         </Route>
       </Routes>
       <Toaster />

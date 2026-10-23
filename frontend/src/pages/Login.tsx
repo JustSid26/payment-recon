@@ -1,6 +1,6 @@
 import { useState, type FormEvent } from 'react'
-import { useNavigate } from 'react-router-dom'
-import { api, ApiError, setSession } from '../lib/api'
+import { Link, Navigate, useNavigate } from 'react-router-dom'
+import { api, ApiError, getToken, getUser, setSession } from '../lib/api'
 import type { LoginResponse } from '../lib/types'
 
 type Role = 'merchant' | 'admin'
@@ -68,9 +68,8 @@ function PasswordInput({
   )
 }
 
-export default function Login() {
+export default function Login({ role }: { role: Role }) {
   const navigate = useNavigate()
-  const [role, setRole] = useState<Role>('merchant')
   const [mode, setMode] = useState<Mode>('login')
   const [identifier, setIdentifier] = useState('')
   const [password, setPassword] = useState('')
@@ -78,6 +77,9 @@ export default function Login() {
   const [error, setError] = useState<string | null>(null)
   const [notice, setNotice] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
+
+  // Already signed in? Don't show a login form — go to the app.
+  if (getToken() && getUser()) return <Navigate to="/dashboard" replace />
 
   const reset = () => {
     setMode('login')
@@ -87,16 +89,9 @@ export default function Login() {
     setConfirm('')
   }
 
-  const switchRole = (r: Role) => {
-    if (r === role) return
-    setRole(r)
-    setIdentifier('')
-    reset()
-  }
-
   const finish = (res: LoginResponse) => {
     setSession(res.token, res.user)
-    navigate('/', { replace: true })
+    navigate('/dashboard', { replace: true })
   }
 
   const doLogin = async (id: string, pw: string) => {
@@ -180,23 +175,9 @@ export default function Login() {
             </div>
           </div>
 
-          <div className="role-toggle" role="tablist" data-role={role}>
-            <span className="role-thumb" aria-hidden="true" />
-            <button
-              type="button" role="tab" aria-selected={isMerchant}
-              className={isMerchant ? 'on' : ''} onClick={() => switchRole('merchant')}
-            >
-              Merchant
-            </button>
-            <button
-              type="button" role="tab" aria-selected={!isMerchant}
-              className={!isMerchant ? 'on' : ''} onClick={() => switchRole('admin')}
-            >
-              Admin
-            </button>
-          </div>
+          <Link to="/" className="lf-back">← Back to home</Link>
 
-          <div className="login-animin" key={role}>
+          <div className="login-animin">
           <div className="login-heading">
             <h2>{isMerchant ? 'Merchant sign in' : 'Admin sign in'}</h2>
             <div className="dim small">
@@ -277,6 +258,14 @@ export default function Login() {
               )
             )}
           </form>
+
+          <div className="lf-switch">
+            {isMerchant ? (
+              <>Operations team? <Link to="/login/admin">Admin sign in →</Link></>
+            ) : (
+              <>Are you a merchant? <Link to="/login/merchant">Merchant sign in →</Link></>
+            )}
+          </div>
           </div>
         </div>
       </main>

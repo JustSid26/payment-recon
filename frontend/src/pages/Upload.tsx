@@ -92,7 +92,7 @@ export default function Upload() {
           <div className="sub">Import processor CSVs and settlement workbooks, then run ledger integrity checks</div>
         </div>
         <div className="head-actions">
-          <button className="btn" onClick={() => navigate('/')}>View dashboard →</button>
+          <button className="btn" onClick={() => navigate('/dashboard')}>View dashboard →</button>
         </div>
       </div>
 

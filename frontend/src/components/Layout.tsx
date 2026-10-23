@@ -9,7 +9,7 @@ type NavItem = { to: string; label: string; icon: string; end?: boolean; tour?: 
 
 const ADMIN_NAV: NavItem[] = [
   { to: '/upload', label: 'Upload & Verify', icon: 'upload_file', tour: 'upload' },
-  { to: '/', label: 'Dashboard', icon: 'dashboard', end: true, tour: 'dashboard' },
+  { to: '/dashboard', label: 'Dashboard', icon: 'dashboard', end: true, tour: 'dashboard' },
   { to: '/merchants', label: 'Merchants', icon: 'storefront', tour: 'merchants' },
   { to: '/transactions', label: 'Transactions', icon: 'receipt_long', tour: 'transactions' },
   { to: '/settlements', label: 'Settlements', icon: 'payments', tour: 'settlements' },
@@ -21,7 +21,7 @@ const ADMIN_NAV: NavItem[] = [
 ]
 
 const MERCHANT_NAV: NavItem[] = [
-  { to: '/', label: 'Dashboard', icon: 'dashboard', end: true, tour: 'dashboard' },
+  { to: '/dashboard', label: 'Dashboard', icon: 'dashboard', end: true, tour: 'dashboard' },
   { to: '/transactions', label: 'Transactions', icon: 'receipt_long', tour: 'transactions' },
   { to: '/settlements', label: 'Settlements', icon: 'payments', tour: 'settlements' },
   { to: '/reserve', label: 'Reserve', icon: 'savings', tour: 'reserve' },
@@ -97,7 +97,7 @@ export default function Layout() {
 
   const logout = () => {
     clearSession()
-    navigate('/login')
+    navigate('/')
   }
 
   const closePwd = () => {
