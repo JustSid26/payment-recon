@@ -1,18 +1,10 @@
 <!doctype html>
-<html lang="en">
+<html lang="en" data-theme="light">
   <head>
     <meta charset="UTF-8" />
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
     <title>CoreServices — Settlement &amp; Ledger</title>
-
-    <!-- Apply the saved theme before first paint so there's no flash. -->
-    <script>
-      try {
-        var t = localStorage.getItem('cs-theme')
-        if (t === 'light' || t === 'dark') document.documentElement.setAttribute('data-theme', t)
-      } catch (e) {}
-    </script>
 
     <!-- PWA -->
     <link rel="manifest" href="/manifest.webmanifest" />

@@ -4,7 +4,6 @@ import { api, ApiError, clearSession, getUser } from '../lib/api'
 import { Modal, toastError, toastSuccess } from './ui'
 import Tour from './Tour'
 import { ADMIN_TOUR, MERCHANT_TOUR, TOUR_EVENT, TOUR_VERSION, openTour } from '../lib/tour'
-import { applyTheme, cycleTheme, getTheme, type Theme } from '../lib/theme'
 import type { AdminStatus } from '../lib/types'
 
 // "Reset demo" wipes ALL data — it belongs only on the demo box / local dev, never on
@@ -44,13 +43,6 @@ export default function Layout() {
   // Mobile nav drawer — closes whenever the route changes.
   const [navOpen, setNavOpen] = useState(false)
   useEffect(() => { setNavOpen(false) }, [location.pathname])
-
-  // Theme toggle (light → dark → system). Sync the theme-color meta on mount.
-  const [theme, setThemeState] = useState<Theme>(getTheme())
-  useEffect(() => { applyTheme(getTheme()) }, [])
-  const THEME_ICON: Record<Theme, string> = { light: 'light_mode', dark: 'dark_mode', system: 'contrast' }
-  const THEME_LABEL: Record<Theme, string> = { light: 'Light', dark: 'Dark', system: 'System' }
-  const toggleTheme = () => setThemeState(cycleTheme())
 
   const [showReset, setShowReset] = useState(false)
   const [resetting, setResetting] = useState(false)
@@ -207,14 +199,6 @@ export default function Layout() {
             <span>CoreServices</span>
           </div>
           <div className="tb-actions" style={{ marginLeft: 'auto' }}>
-            <button
-              className="btn sm icon-btn"
-              onClick={toggleTheme}
-              title={`Theme: ${THEME_LABEL[theme]} — click to change`}
-              aria-label={`Theme: ${THEME_LABEL[theme]}`}
-            >
-              <span className="material-symbols-outlined">{THEME_ICON[theme]}</span>
-            </button>
             {isAdmin && IS_DEMO_HOST && (
               <button className="btn sm" onClick={() => setShowReset(true)}>
                 ⟳ Reset demo
