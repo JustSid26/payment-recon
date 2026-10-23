@@ -6,11 +6,6 @@ import type { LoginResponse } from '../lib/types'
 type Role = 'merchant' | 'admin'
 type Mode = 'login' | 'set-password'
 
-const DEMO: Record<Role, { email: string; password: string; sub: string }> = {
-  admin: { email: 'admin@coreservices.io', password: 'demo123', sub: 'CoreServices operations' },
-  merchant: { email: 'merchant@canamoney.com', password: 'demo123', sub: 'CANAMONEY EXCHANGE LTD.' },
-}
-
 // The brand panel speaks to whoever is signing in: operators reconcile the whole
 // book; merchants read their own payouts.
 const BRAND: Record<Role, { line1: string; hl: string; sub: string; features: { t: string; s: string }[] }> = {
@@ -35,11 +30,6 @@ const BRAND: Record<Role, { line1: string; hl: string; sub: string; features: { 
     ],
   },
 }
-
-// The demo-credentials shortcut only belongs on the demo box / local dev — never on
-// a client production deployment.
-const DEMO_HOSTS = ['app.paymentrecon.site', 'localhost', '127.0.0.1']
-const SHOW_DEMO = typeof window !== 'undefined' && DEMO_HOSTS.includes(window.location.hostname)
 
 function PasswordInput({
   id, value, onChange, placeholder, autoComplete, onEnter,
@@ -287,25 +277,6 @@ export default function Login() {
               )
             )}
           </form>
-
-          {SHOW_DEMO && (
-            <button
-              type="button"
-              className="demo-chip"
-              disabled={busy}
-              onClick={() => {
-                reset()
-                const d = DEMO[role]
-                setIdentifier(d.email)
-                setPassword(d.password)
-                void doLogin(d.email, d.password)
-              }}
-            >
-              <div className="t">Use {isMerchant ? 'merchant' : 'admin'} demo</div>
-              <div className="s">{DEMO[role].email}</div>
-              <div className="s">{DEMO[role].sub}</div>
-            </button>
-          )}
           </div>
         </div>
       </main>
